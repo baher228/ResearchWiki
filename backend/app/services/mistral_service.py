@@ -31,8 +31,6 @@ Guidelines for the sections:
 
 
 async def summarize_paper(text: str) -> dict:
-    """Send paper text to Mistral and return a structured wiki summary."""
-
     settings = get_settings()
 
     if not settings.MISTRAL_API_KEY or settings.MISTRAL_API_KEY == "your_mistral_api_key_here":

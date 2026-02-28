@@ -25,3 +25,16 @@ async def summarize_paper(request: SummarizeRequest):
             status_code=500,
             detail=f"Summarization failed: {exc}",
         )
+
+@router.post("/upload")
+async def upload_paper(file: UploadFile = File(...)):
+    try:
+        content = await pdf_parser.parse_pdf(file)
+        result = await mistral_service.summarize_paper(content)
+        return SummarizeResponse(**result)
+    except Exception as exc:
+        logger.exception("Upload failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload failed: {exc}",
+        )
