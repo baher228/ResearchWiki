@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import asyncio
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -88,7 +89,6 @@ async def summarize_paper(text: str) -> str:
 
     # Extract image info from the parsed markdown
     images = _extract_image_info(text)
-    image_list_text = _build_image_list_text(images)
     logger.info("Found %d images in the paper text", len(images))
 
     user_message = f"Summarize the following research paper into a wiki-style markdown page:\n\n{text}"

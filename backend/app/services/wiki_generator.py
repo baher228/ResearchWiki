@@ -22,27 +22,23 @@ def generate_wiki_html(md_text, base_name, output_dir):
     soup = BeautifulSoup(html_content, "html.parser")
     import fitz
     
-    # 1. First extract all images and wrap them
+    # 1. First extract all images and group them if adjacent
     images = soup.find_all('img')
     grouped_images = []
     
-    # Group images that belong together (in the same p tag or consecutive p tags)
     current_group = []
     for img in images:
         if not current_group:
             current_group.append(img)
         else:
             prev_img = current_group[-1]
-            # They are grouped if they share a parent or their parents are siblings contiguous
             p_curr = img.find_parent('p')
             p_prev = prev_img.find_parent('p')
             
             if p_curr and p_prev and p_curr == p_prev:
                 current_group.append(img)
             elif p_curr and p_prev:
-                # Check if p_prev is immediately before p_curr
                 curr_node = p_prev.next_sibling
-                is_consecutive = False
                 while curr_node and curr_node != p_curr:
                     if curr_node.name and curr_node.name != 'br':
                         break
@@ -60,35 +56,50 @@ def generate_wiki_html(md_text, base_name, output_dir):
     if current_group:
         grouped_images.append(current_group)
 
-    # 2. Process groups and assign CSS classes based on width/count
+    # 2. Process groups and assign CSS containers
     for group in grouped_images:
-        is_wide = False
+        # Determine insertion point
+        insertion_node = group[0].find_parent('p') or group[0]
+        
+        # Optional parent wrapper if multiple images
         if len(group) > 1:
-            is_wide = True
+            group_div = soup.new_tag(
+                "div", 
+                attrs={"class": "wiki-figure-group", "style": "display: flex; justify-content: center; gap: 1em; flex-wrap: wrap; margin: 1.5em auto;"}
+            )
+            insertion_node.insert_before(group_div)
+            container = group_div
         else:
-            img = group[0]
+            container = None
+            
+        for img in group:
+            p = img.find_parent('p')
+            
+            # Read true image width to constrain the container
+            img_width = None
             src = img.get('src', '')
             if os.path.exists(src):
                 try:
                     px = fitz.Pixmap(src)
-                    if px.width > 500:
-                        is_wide = True
-                    # Clean up the pixmap to free memory
+                    img_width = px.width
                     px = None
                 except Exception as e:
                     print(f"Could not read image width for {src}: {e}")
                     
-        figure_class = "wiki-figure center" if is_wide else "wiki-figure right"
-        figure_div = soup.new_tag("div", attrs={"class": figure_class})
-        
-        # Determine insertion point (before the parent <p> of the first image, or the image itself)
-        insertion_node = group[0].find_parent('p') or group[0]
-        
-        # Insert the figure container into the DOM first
-        insertion_node.insert_before(figure_div)
-        
-        for img in group:
-            p = img.find_parent('p')
+            # Set inline style to shrink the figure container to the image width
+            style = f"width: {img_width}px;" if img_width else "width: max-content;"
+            
+            figure_class = "wiki-figure center"
+            figure_div = soup.new_tag("div", attrs={"class": figure_class, "style": style})
+            
+            if container:
+                container.append(figure_div)
+                # clear vertical margins for flex items so they align nicely inside the flex row
+                figure_div['style'] += " margin: 0;"
+            else:
+                insertion_node.insert_before(figure_div)
+            
+            # Extract image from original location and put it in figure_div
             figure_div.append(img.extract())
             
             # Extract caption from alt text
@@ -97,7 +108,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
                 caption_div = soup.new_tag("div", attrs={"class": "wiki-caption"})
                 caption_div.string = alt_text
                 figure_div.append(caption_div)
-            
+                
             # If the p is now empty, kill it
             if p and not p.get_text(strip=True) and not p.find('img'):
                 p.decompose()
