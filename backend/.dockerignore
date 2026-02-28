@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.env
+.venv
+venv
+certs/
+app/assets/pages/*
+app/assets/markdowns/*
+*.egg-info
+response.json
