@@ -1,8 +1,12 @@
 import sys
 import os
 import webbrowser
-from wiki_parser import parse_pdf_to_markdown
-from wiki_generator import generate_wiki_html
+
+# Ensure app is importable
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from app.services.wiki_parser import parse_pdf_to_markdown
+from app.services.wiki_generator import generate_wiki_html
 
 def main():
     if len(sys.argv) < 2:
@@ -25,19 +29,36 @@ def main():
     if not os.path.exists(images_dir):
         os.makedirs(images_dir)
         
+    from app.services.mistral_service import summarize_paper
+    import asyncio
+
     # Phase 1: Parsing
     md_text = parse_pdf_to_markdown(pdf_path, images_dir)
     
-    md_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "markdowns"))
-    if not os.path.exists(md_dir):
-        os.makedirs(md_dir)
+    orig_md_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "original_markdowns"))
+    if not os.path.exists(orig_md_dir):
+        os.makedirs(orig_md_dir)
         
-    output_md_path = os.path.join(md_dir, f"{base_name}.md")
+    output_md_path = os.path.join(orig_md_dir, f"{base_name}.md")
     with open(output_md_path, "w", encoding="utf-8") as f:
         f.write(md_text)
+        
+    print(f"Extracted {len(md_text)} chars of text.")
+    print("Running Mistral summarization...")
     
-    # Phase 2: Generating
-    html_output = generate_wiki_html(md_text, base_name, pages_dir)
+    # Phase 2: AI Summarization
+    summary_md = asyncio.run(summarize_paper(md_text))
+    
+    mistral_md_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "mistral_markdowns"))
+    if not os.path.exists(mistral_md_dir):
+        os.makedirs(mistral_md_dir)
+        
+    summary_md_path = os.path.join(mistral_md_dir, f"{base_name}_SUMMARY.md")
+    with open(summary_md_path, "w", encoding="utf-8") as f:
+        f.write(summary_md)
+    
+    # Phase 3: Generating HTML
+    html_output = generate_wiki_html(summary_md, base_name, pages_dir)
     
     # Save Output
     output_html_path = os.path.join(pages_dir, f"{base_name}.html")
