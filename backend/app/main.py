@@ -1,7 +1,9 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.routers import papers
 
@@ -34,6 +36,13 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Static files — serve generated HTML, images, and markdowns
+# ---------------------------------------------------------------------------
+_ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
+os.makedirs(_ASSETS_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_ASSETS_DIR), name="static")
+
+# ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
 app.include_router(papers.router)
@@ -45,3 +54,4 @@ app.include_router(papers.router)
 @app.get("/health", tags=["Health"])
 async def health_check():
     return {"status": "ok"}
+
