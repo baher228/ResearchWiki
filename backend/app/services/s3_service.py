@@ -20,13 +20,15 @@ def _get_client():
     return boto3.client("s3", **kwargs)
 
 
-def upload_file(local_path: str, s3_key: str, content_type: str = None) -> str:
+def upload_file(local_path: str, s3_key: str, content_type: str = None, public: bool = False) -> str:
     """Upload a single file to S3. Returns the S3 key."""
     settings = get_settings()
     client = _get_client()
     extra = {}
     if content_type:
         extra["ContentType"] = content_type
+    if public:
+        extra["ACL"] = "public-read"
     client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
     logger.info("Uploaded %s → s3://%s/%s", local_path, settings.S3_BUCKET_NAME, s3_key)
     return s3_key
@@ -46,14 +48,14 @@ def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octe
     return s3_key
 
 
-def upload_directory(local_dir: str, s3_prefix: str) -> int:
+def upload_directory(local_dir: str, s3_prefix: str, public: bool = False) -> int:
     """Upload all files in a directory to S3 under a prefix. Returns count."""
     count = 0
     for fname in os.listdir(local_dir):
         fpath = os.path.join(local_dir, fname)
         if os.path.isfile(fpath):
             ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
-            upload_file(fpath, f"{s3_prefix}/{fname}", content_type=ct)
+            upload_file(fpath, f"{s3_prefix}/{fname}", content_type=ct, public=public)
             count += 1
     return count
 

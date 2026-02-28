@@ -36,11 +36,15 @@
         >
       </div>
 
-      <div
-        v-if="tab === 'preview'"
-        class="article-body"
-        v-html="renderedHtml"
-      ></div>
+      <div v-if="tab === 'preview'" class="article-preview-frame">
+        <iframe
+          v-if="fullHtmlUrl"
+          :src="fullHtmlUrl"
+          class="wiki-iframe"
+          frameborder="0"
+        ></iframe>
+        <p v-else class="empty-state">No preview available.</p>
+      </div>
 
       <pre v-else class="source-view">{{ paper.markdown }}</pre>
 
@@ -175,6 +179,18 @@ export default {
   border-bottom-color: #3366cc;
   background-color: #fff;
   font-weight: 500;
+}
+
+.article-preview-frame {
+  width: 100%;
+  margin-top: 1em;
+}
+
+.wiki-iframe {
+  width: 100%;
+  height: 80vh;
+  border: 1px solid #eaecf0;
+  border-radius: 2px;
 }
 
 .article-body {

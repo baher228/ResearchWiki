@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import tempfile
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -57,15 +58,17 @@ async def upload_paper(file: UploadFile = File(...)):
         pdf_bytes = await file.read()
         base_name = os.path.splitext(file.filename)[0]
 
-        # 1. Save PDF to temp
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.write(pdf_bytes)
-        tmp.close()
+        # 1. Save PDF to temp using the original base_name so pymupdf4llm names
+        #    extracted images as "{base_name}-{page}-{idx}.png" instead of random tmp names
+        tmp_dir = tempfile.mkdtemp()
+        tmp_pdf_path = os.path.join(tmp_dir, f"{base_name}.pdf")
+        with open(tmp_pdf_path, "wb") as tmp_f:
+            tmp_f.write(pdf_bytes)
 
         # 2. Parse PDF → text + images
         images_dir = os.path.join(_PAGES_DIR, f"{base_name}_images")
         os.makedirs(images_dir, exist_ok=True)
-        raw_md = parse_pdf_to_markdown(tmp.name, images_dir)
+        raw_md = parse_pdf_to_markdown(tmp_pdf_path, images_dir)
 
         image_files = [f for f in os.listdir(images_dir) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
@@ -113,7 +116,7 @@ async def upload_paper(file: UploadFile = File(...)):
                 s3_prefix = f"papers/{base_name}"
                 s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
                 s3_images_prefix = f"{s3_prefix}/images"
-                s3_service.upload_directory(images_dir, s3_images_prefix)
+                s3_service.upload_directory(images_dir, s3_images_prefix, public=True)
 
                 # Rewrite image URLs in markdown to point at S3
                 s3_images_base = s3_service.get_url(s3_images_prefix)
@@ -137,8 +140,8 @@ async def upload_paper(file: UploadFile = File(...)):
                 logger.warning("S3 upload failed, using local files: %s", s3_err)
 
         # Clean up temp
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         # 7. Save to database
         paper_id, created_at = database.insert_paper(
