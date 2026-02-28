@@ -90,6 +90,7 @@ async def summarize_paper(text: str) -> str:
     # Extract image info from the parsed markdown
     images = _extract_image_info(text)
     logger.info("Found %d images in the paper text", len(images))
+    image_list_text = _build_image_list_text(images)
 
     user_message = f"Summarize the following research paper into a wiki-style markdown page:\n\n{text}"
     if image_list_text:
