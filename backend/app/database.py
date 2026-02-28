@@ -103,3 +103,14 @@ def get_paper_by_id(paper_id: str):
         row["id"] = str(row["id"])
         row["created_at"] = row["created_at"].isoformat()
     return row
+
+
+def get_all_filenames():
+    """Return all (id, original_filename) pairs for deduplication checks."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, original_filename FROM papers")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [(str(r[0]), r[1]) for r in rows]

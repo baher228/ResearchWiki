@@ -1,3 +1,4 @@
+import difflib
 import logging
 import os
 import re
@@ -34,6 +35,34 @@ def _upload_background_images(images_dir: str, s3_images_prefix: str, filenames:
                 logger.error("Failed to background upload %s: %s", fname, e)
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize a filename for fuzzy comparison — strip extension, lowercase, remove non-alphanumeric."""
+    name = os.path.splitext(name)[0]
+    name = name.lower()
+    name = re.sub(r'[\s\-_]+', '', name)
+    name = re.sub(r'[^a-z0-9]', '', name)
+    return name
+
+
+def _find_existing_paper(filename: str, threshold: float = 0.85) -> str | None:
+    """Return the ID of an already-processed paper whose filename closely matches filename."""
+    normalized_new = _normalize_name(filename)
+    try:
+        rows = database.get_all_filenames()
+    except Exception:
+        return None
+    best_ratio = 0.0
+    best_id = None
+    for paper_id, existing_filename in rows:
+        normalized_existing = _normalize_name(existing_filename or "")
+        ratio = difflib.SequenceMatcher(None, normalized_new, normalized_existing).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_id = paper_id
+    logger.debug("Fuzzy match for '%s': best ratio=%.2f (id=%s)", filename, best_ratio, best_id)
+    return best_id if best_ratio >= threshold else None
+
+
 def _extract_title(markdown: str) -> str:
     for line in markdown.splitlines():
         stripped = line.strip()
@@ -64,6 +93,35 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+
+    # ── Deduplication check ─────────────────────────────────────────────
+    existing_id = _find_existing_paper(file.filename)
+    if existing_id:
+        paper = database.get_paper_by_id(existing_id)
+        if paper:
+            name = os.path.splitext(paper.get("original_filename", ""))[0]
+            if paper.get("s3_html_key"):
+                html_url = s3_service.get_url(paper["s3_html_key"])
+                md_url = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else ""
+            else:
+                html_url = f"/static/pages/{name}.html"
+                md_url = f"/static/markdowns/{name}.md"
+            md_path = os.path.join(_MD_DIR, f"{name}.md")
+            markdown = ""
+            if os.path.exists(md_path):
+                with open(md_path, "r", encoding="utf-8") as f:
+                    markdown = f.read()
+            logger.info("Paper '%s' already exists (id=%s), returning cached result", file.filename, existing_id)
+            return PipelineResponse(
+                id=paper["id"],
+                title=paper["title"],
+                markdown=markdown,
+                html_url=html_url,
+                markdown_url=md_url,
+                images_used=paper.get("images_used", 0),
+                images_extracted=paper.get("images_extracted", 0),
+                created_at=paper["created_at"],
+            )
 
     try:
         pdf_bytes = await file.read()
