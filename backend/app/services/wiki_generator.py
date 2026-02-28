@@ -20,60 +20,88 @@ def generate_wiki_html(md_text, base_name, output_dir):
     
     # Post-process with BeautifulSoup for figure repositioning
     soup = BeautifulSoup(html_content, "html.parser")
+    import fitz
     
-    for p in soup.find_all('p'):
-        text = p.get_text(separator=" ").strip()
-        match = re.match(r'^(?:Figure|Fig\.?)\s+(\d+)', text, re.IGNORECASE)
-        if match:
-            fig_num = match.group(1)
+    # 1. First extract all images and wrap them
+    images = soup.find_all('img')
+    grouped_images = []
+    
+    # Group images that belong together (in the same p tag or consecutive p tags)
+    current_group = []
+    for img in images:
+        if not current_group:
+            current_group.append(img)
+        else:
+            prev_img = current_group[-1]
+            # They are grouped if they share a parent or their parents are siblings contiguous
+            p_curr = img.find_parent('p')
+            p_prev = prev_img.find_parent('p')
             
-            images_to_bundle = []
-            curr = p.previous_sibling
-            nodes_to_remove = []
-            
-            # Look back up to 15 elements to find images for this figure
-            for _ in range(15):
-                if not curr: break
-                if curr.name == 'p' and curr.find('img'):
-                    images_to_bundle.extend(curr.find_all('img'))
-                    nodes_to_remove.append(curr)
-                elif curr.name == 'img':
-                    images_to_bundle.append(curr)
-                    nodes_to_remove.append(curr)
-                elif curr.name in ['h1', 'h2', 'h3', 'h4']: 
-                    break
-                curr = curr.previous_sibling
+            if p_curr and p_prev and p_curr == p_prev:
+                current_group.append(img)
+            elif p_curr and p_prev:
+                # Check if p_prev is immediately before p_curr
+                curr_node = p_prev.next_sibling
+                is_consecutive = False
+                while curr_node and curr_node != p_curr:
+                    if curr_node.name and curr_node.name != 'br':
+                        break
+                    curr_node = curr_node.next_sibling
                 
-            if not images_to_bundle:
-                continue
-                
-            figure_div = soup.new_tag("div", attrs={"class": "wiki-figure"})
-            for img in reversed(images_to_bundle):
-                figure_div.append(img.extract())
-                
-            for node in nodes_to_remove:
-                if not node.get_text(strip=True) and not node.find('img'):
-                    node.decompose()
+                if curr_node == p_curr:
+                    current_group.append(img)
+                else:
+                    grouped_images.append(current_group)
+                    current_group = [img]
+            else:
+                grouped_images.append(current_group)
+                current_group = [img]
                     
-            caption_div = soup.new_tag("div", attrs={"class": "wiki-caption"})
-            for child in list(p.contents):
-                caption_div.append(child.extract())
-            figure_div.append(caption_div)
-            
-            ref_pattern = re.compile(rf'(?:Figure|Fig\.?)\s+{fig_num}\b', re.IGNORECASE)
-            placed = False
-            for tag in soup.find_all('p'):
-                if tag == p or figure_div in tag.parents:
-                    continue
-                if ref_pattern.search(tag.get_text()):
-                    tag.insert_before(figure_div)
-                    placed = True
-                    break
+    if current_group:
+        grouped_images.append(current_group)
+
+    # 2. Process groups and assign CSS classes based on width/count
+    for group in grouped_images:
+        is_wide = False
+        if len(group) > 1:
+            is_wide = True
+        else:
+            img = group[0]
+            src = img.get('src', '')
+            if os.path.exists(src):
+                try:
+                    px = fitz.Pixmap(src)
+                    if px.width > 500:
+                        is_wide = True
+                    # Clean up the pixmap to free memory
+                    px = None
+                except Exception as e:
+                    print(f"Could not read image width for {src}: {e}")
                     
-            if not placed:
-                p.insert_before(figure_div)
-                
-            p.decompose()
+        figure_class = "wiki-figure center" if is_wide else "wiki-figure right"
+        figure_div = soup.new_tag("div", attrs={"class": figure_class})
+        
+        # Determine insertion point (before the parent <p> of the first image, or the image itself)
+        insertion_node = group[0].find_parent('p') or group[0]
+        
+        # Insert the figure container into the DOM first
+        insertion_node.insert_before(figure_div)
+        
+        for img in group:
+            p = img.find_parent('p')
+            figure_div.append(img.extract())
+            
+            # Extract caption from alt text
+            alt_text = img.get('alt', '').strip()
+            if alt_text:
+                caption_div = soup.new_tag("div", attrs={"class": "wiki-caption"})
+                caption_div.string = alt_text
+                figure_div.append(caption_div)
+            
+            # If the p is now empty, kill it
+            if p and not p.get_text(strip=True) and not p.find('img'):
+                p.decompose()
+            
             
     html_content = str(soup)
     

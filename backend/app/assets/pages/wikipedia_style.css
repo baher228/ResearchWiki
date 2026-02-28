@@ -180,7 +180,7 @@ a:hover {
     margin-bottom: 0.5em;
 }
 
-.wiki-figure {
+.wiki-figure.right {
     float: right;
     clear: right;
     margin: 0.5em 0 1.5em 1.5em;
@@ -188,6 +188,17 @@ a:hover {
     border: 1px solid #c8ccd1;
     padding: 0.5em;
     max-width: 350px;
+    font-size: 0.9em;
+}
+
+.wiki-figure.center {
+    margin: 1.5em auto;
+    clear: both;
+    background-color: #f8f9fa;
+    border: 1px solid #c8ccd1;
+    padding: 0.5em;
+    text-align: center;
+    max-width: 90%;
     font-size: 0.9em;
 }
 

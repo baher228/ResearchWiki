@@ -5,38 +5,9 @@ from mistralai import Mistral
 
 from app.config import get_settings
 
+from app.prompt import SYSTEM_PROMPT
+
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """You are an expert academic summarizer. Your job is to READ a research paper and produce a CONCISE, wiki-style Markdown summary — like a Wikipedia article about the paper.
-
-IMPORTANT: You must SUMMARIZE and CONDENSE the paper, NOT reproduce it verbatim. A typical 15-page paper should become a 2-4 page wiki article. Distill the key ideas, methods, results, and contributions into accessible prose.
-
-Format requirements:
-1. Start with the paper title as an H4 heading (####), followed by the authors in bold with their affiliations on the next line.
-2. Use H2 headings (##) for sections. Use this structure:
-   - ## Abstract (2-3 sentence summary of the paper's purpose and findings)
-   - ## Background (why this work matters, what problem it addresses)
-   - ## Method (summarize the core approach — explain the key idea simply, include only the most important equations)
-   - ## Experiments & Results (highlight the main findings, comparisons, and takeaways)
-   - ## Conclusion (key contributions and impact)
-   - ## References (include only the 5-10 most important cited works)
-3. Use H3 (###) for sub-sections only when needed.
-
-Writing guidelines:
-- Write in clear, encyclopedic language accessible to someone with general ML/science knowledge.
-- Explain technical concepts — don't just state them. A reader unfamiliar with the paper should understand the summary.
-- Condense multiple paragraphs into key sentences. Cut redundancy, verbose explanations, and minor details.
-- Use markdown formatting: **bold** for key terms, _italics_ for definitions, bullet lists for comparisons or enumerated contributions.
-
-IMAGE GUIDELINES (very important):
-- The paper text will contain image references in the format ![](image_path). These are figures extracted from the PDF.
-- You will also receive a list of available image filenames.
-- When a figure is important for understanding (e.g. architecture diagrams, key result plots, algorithm pseudocode), INCLUDE it in your summary using: ![Figure N: description](FIGURE_N)
-- Use the placeholder FIGURE_N (e.g. FIGURE_1, FIGURE_2) and we will replace it with the actual image path later.
-- Include 3-6 of the most important figures. Write a short caption for each.
-- Place figures near the text that discusses them.
-- Return ONLY the markdown content — no wrapping fences, no explanations, just the raw markdown document.
-"""
 
 
 def _extract_image_info(paper_text: str) -> list[dict]:
@@ -79,10 +50,11 @@ def _build_image_list_text(images: list[dict]) -> str:
 
 
 def post_process_images(summary: str, images: list[dict]) -> str:
-    """Replace FIGURE_N placeholders in the summary with actual image paths."""
+    """Replace FIGURE_N placeholders in the summary with actual image paths using word boundaries."""
     for img in images:
-        placeholder = f"FIGURE_{img['index']}"
-        summary = summary.replace(placeholder, img["path"])
+        # Use a regex word boundary to prevent FIGURE_1 replacing FIGURE_16
+        pattern = r"\bFIGURE_" + str(img['index']) + r"\b"
+        summary = re.sub(pattern, img["path"], summary)
     return summary
 
 
@@ -120,6 +92,17 @@ async def summarize_paper(text: str) -> str:
     )
 
     markdown_content = response.choices[0].message.content
+    
+    # Mistral sometimes wraps the response in a ```markdown ... ``` block. We need to strip it out.
+    if markdown_content.startswith("```markdown"):
+        markdown_content = markdown_content[11:]
+    elif markdown_content.startswith("```"):
+        markdown_content = markdown_content[3:]
+    if markdown_content.endswith("```"):
+        markdown_content = markdown_content[:-3]
+        
+    markdown_content = markdown_content.strip()
+
     logger.info("Received markdown response (%d chars)", len(markdown_content))
 
     # Replace image placeholders with real paths
