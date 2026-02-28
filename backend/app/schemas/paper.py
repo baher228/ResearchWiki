@@ -3,28 +3,20 @@ from typing import Optional
 
 
 class SummarizeRequest(BaseModel):
-    """Request body for paper summarization (raw text input)."""
-
-    text: str = Field(
-        ...,
-        min_length=50,
-        description="The full text content of the research paper to summarize.",
-    )
+    text: str = Field(..., min_length=50)
 
 
 class SummarizeResponse(BaseModel):
-    """Wiki-style markdown summary returned to the client."""
-
-    title: str = Field(..., description="The paper title extracted from the markdown.")
-    markdown: str = Field(..., description="Full wiki-style markdown content.")
+    title: str
+    markdown: str
 
 
 class PipelineResponse(BaseModel):
-    """Full pipeline response: summarized markdown + generated wiki HTML."""
-
-    title: str = Field(..., description="The paper title extracted from the markdown.")
-    markdown: str = Field(..., description="Summarized wiki-style markdown content.")
-    html_url: str = Field(..., description="URL path to the generated wiki HTML page.")
-    markdown_url: str = Field(..., description="URL path to the saved summary markdown.")
-    images_used: int = Field(0, description="Number of figures referenced in the summary.")
-    images_extracted: int = Field(0, description="Total number of images extracted from the PDF.")
+    id: str = Field(..., description="Paper UUID from the database.")
+    title: str
+    markdown: str
+    html_url: str
+    markdown_url: str
+    images_used: int = 0
+    images_extracted: int = 0
+    created_at: str = ""
