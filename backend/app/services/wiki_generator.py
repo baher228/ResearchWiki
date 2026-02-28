@@ -77,12 +77,21 @@ def generate_wiki_html(md_text, base_name, output_dir):
             
     html_content = str(soup)
     
-    # Load CSS
-    css_path = os.path.join(os.path.dirname(__file__), "wikipedia_style.css")
+    # Load CSS and Logo
+    import base64
+    pages_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "pages"))
+    css_path = os.path.join(pages_dir, "wikipedia_style.css")
     css_content = ""
     if os.path.exists(css_path):
         with open(css_path, "r", encoding="utf-8") as f:
             css_content = f.read()
+            
+    logo_path = os.path.join(pages_dir, "WikiResearch.png")
+    logo_src = "WikiResearch.png"
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            b64_img = base64.b64encode(f.read()).decode("utf-8")
+            logo_src = f"data:image/png;base64,{b64_img}"
             
     # Assembly with Template
     html_template = f"""<!DOCTYPE html>
@@ -105,7 +114,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
 <body>
     <div class="wiki-header">
         <div class="header-logo">
-            <img src="WikiResearch.png" alt="Wikipedia Logo">
+            <img src="{logo_src}" alt="Wikipedia Logo">
             <span class="header-logo-text">WikiResearch</span>
         </div>
         <div class="header-search">
