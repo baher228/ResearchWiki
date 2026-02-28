@@ -54,8 +54,8 @@ export default {
   },
   methods: {
     openPaper(paper) {
-      sessionStorage.setItem('lastResult', JSON.stringify(paper))
-      this.$router.push({ name: 'result', params: { id: paper.id } })
+      const url = this.getFullUrl(paper.html_url)
+      window.location.href = url
     },
     getFullUrl(url) {
       if (url.startsWith('http')) return url

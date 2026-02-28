@@ -74,15 +74,25 @@ async def upload_paper(file: UploadFile = File(...)):
         title = _extract_title(summary_md)
         img_refs = re.findall(r'!\[[^\]]*\]\([^)]+\)', summary_md)
 
-        # 4. Save markdown locally
+        # 5. Rewrite image paths to browser-accessible /static/ URLs
+        # The parser stores absolute paths like /app/app/assets/pages/NAME_images/img.png
+        # We need them to be /static/pages/NAME_images/img.png
+        images_rel = f"{base_name}_images"
+        summary_for_html = re.sub(
+            r'!\[([^\]]*)\]\([^)]*?' + re.escape(images_rel) + r'/([^)]+)\)',
+            rf'![\1](/static/pages/{images_rel}/\2)',
+            summary_md,
+        )
+
+        # 4. Save markdown locally (use rewritten /static/ paths so frontend can load images)
         os.makedirs(_MD_DIR, exist_ok=True)
         md_path = os.path.join(_MD_DIR, f"{base_name}.md")
         with open(md_path, "w", encoding="utf-8") as f:
-            f.write(summary_md)
+            f.write(summary_for_html)
 
-        # 5. Generate HTML
+        # 6. Generate HTML
         os.makedirs(_PAGES_DIR, exist_ok=True)
-        html_content = generate_wiki_html(summary_md, base_name, _PAGES_DIR)
+        html_content = generate_wiki_html(summary_for_html, base_name, _PAGES_DIR)
         html_path = os.path.join(_PAGES_DIR, f"{base_name}.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_content)
@@ -94,16 +104,32 @@ async def upload_paper(file: UploadFile = File(...)):
         s3_images_prefix = ""
         html_url = f"/static/pages/{base_name}.html"
         md_url = f"/static/markdowns/{base_name}.md"
+        # markdown to return — starts with /static/ paths, upgraded to S3 URLs if available
+        final_markdown = summary_for_html
 
         settings = get_settings()
         if settings.S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID:
             try:
                 s3_prefix = f"papers/{base_name}"
                 s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
-                s3_md_key = s3_service.upload_file(md_path, f"{s3_prefix}/summary.md", "text/markdown")
-                s3_html_key = s3_service.upload_file(html_path, f"{s3_prefix}/wiki.html", "text/html")
                 s3_images_prefix = f"{s3_prefix}/images"
                 s3_service.upload_directory(images_dir, s3_images_prefix)
+
+                # Rewrite image URLs in markdown to point at S3
+                s3_images_base = s3_service.get_url(s3_images_prefix)
+                images_rel = f"{base_name}_images"
+                final_markdown = re.sub(
+                    r'!\[([^\]]*)\]\(/static/pages/' + re.escape(images_rel) + r'/([^)]+)\)',
+                    rf'![\1]({s3_images_base}/\2)',
+                    summary_for_html,
+                )
+
+                # Save S3-URL version to disk and upload
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(final_markdown)
+
+                s3_md_key = s3_service.upload_file(md_path, f"{s3_prefix}/summary.md", "text/markdown")
+                s3_html_key = s3_service.upload_file(html_path, f"{s3_prefix}/wiki.html", "text/html")
                 html_url = s3_service.get_url(s3_html_key)
                 md_url = s3_service.get_url(s3_md_key)
                 logger.info("Uploaded to S3 successfully")
@@ -129,7 +155,7 @@ async def upload_paper(file: UploadFile = File(...)):
         return PipelineResponse(
             id=paper_id,
             title=title,
-            markdown=summary_md,
+            markdown=final_markdown,
             html_url=html_url,
             markdown_url=md_url,
             images_used=len(img_refs),

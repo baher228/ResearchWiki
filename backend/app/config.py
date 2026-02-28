@@ -6,8 +6,8 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
-    MISTRAL_MODEL: str = "mistral-medium-latest"
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")  # kept for reference
+    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral.mistral-large-2407-v1:0")
 
     # PostgreSQL (RDS)
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = os.path.join(os.path.dirname(__file__), "..", ".env")
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 @lru_cache()

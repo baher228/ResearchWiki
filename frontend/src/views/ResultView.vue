@@ -9,27 +9,38 @@
 
       <div class="article-meta">
         <em>From ResearchWiki — AI-generated summary</em>
-        <span v-if="paper.created_at"> · {{ formatDate(paper.created_at) }}</span>
+        <span v-if="paper.created_at">
+          · {{ formatDate(paper.created_at) }}</span
+        >
       </div>
 
       <div class="notice notice-info">
         <strong>Summary statistics:</strong>
-        {{ paper.images_used }} figure(s) referenced from {{ paper.images_extracted }} extracted.
-        <a v-if="paper.html_url" :href="fullHtmlUrl" target="_blank">View full wiki page ↗</a>
+        {{ paper.images_used }} figure(s) referenced from
+        {{ paper.images_extracted }} extracted.
+        <a v-if="paper.html_url" :href="fullHtmlUrl" target="_blank"
+          >View full wiki page ↗</a
+        >
       </div>
 
       <div class="tab-bar">
         <span
           :class="['tab', { active: tab === 'preview' }]"
           @click="tab = 'preview'"
-        >Article preview</span>
+          >Article preview</span
+        >
         <span
           :class="['tab', { active: tab === 'markdown' }]"
           @click="tab = 'markdown'"
-        >Markdown source</span>
+          >Markdown source</span
+        >
       </div>
 
-      <div v-if="tab === 'preview'" class="article-body" v-html="renderedHtml"></div>
+      <div
+        v-if="tab === 'preview'"
+        class="article-body"
+        v-html="renderedHtml"
+      ></div>
 
       <pre v-else class="source-view">{{ paper.markdown }}</pre>
 
@@ -52,55 +63,66 @@ export default {
     return {
       paper: null,
       loading: true,
-      tab: 'preview',
-    }
+      tab: "preview",
+    };
   },
   computed: {
     fullHtmlUrl() {
-      if (!this.paper?.html_url) return ''
-      if (this.paper.html_url.startsWith('http')) return this.paper.html_url
-      return 'http://localhost:8000' + this.paper.html_url
+      if (!this.paper?.html_url) return "";
+      if (this.paper.html_url.startsWith("http")) return this.paper.html_url;
+      return "http://localhost:8000" + this.paper.html_url;
     },
     renderedHtml() {
-      if (!this.paper?.markdown) return ''
+      if (!this.paper?.markdown) return "";
       return this.paper.markdown
-        .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/_(.+?)_/g, '<em>$1</em>')
-        .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="wiki-figure center"><img src="$2" alt="$1" /><div class="wiki-caption">$1</div></div>')
-        .replace(/\n{2,}/g, '<br /><br />')
-        .replace(/^---$/gm, '<hr />')
+        .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+        .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+        .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+        .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/_(.+?)_/g, "<em>$1</em>")
+        .replace(/^- (.+)$/gm, "<li>$1</li>")
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+          const fullSrc = src.startsWith("/")
+            ? `http://localhost:8000${src}`
+            : src;
+          return `<div class="wiki-figure center"><img src="${fullSrc}" alt="${alt}" /><div class="wiki-caption">${alt}</div></div>`;
+        })
+        .replace(/\n{2,}/g, "<br /><br />")
+        .replace(/^---$/gm, "<hr />");
     },
   },
   async created() {
-    const id = this.$route.params.id
-    const cached = sessionStorage.getItem('lastResult')
+    const id = this.$route.params.id;
+    const cached = sessionStorage.getItem("lastResult");
     if (cached) {
-      const data = JSON.parse(cached)
+      const data = JSON.parse(cached);
       if (!id || data.id === id) {
-        this.paper = data
-        this.loading = false
-        return
+        this.paper = data;
+        this.loading = false;
+        return;
       }
     }
     if (id) {
       try {
-        const res = await fetch(`http://localhost:8000/papers/${id}`)
-        if (res.ok) this.paper = await res.json()
-      } catch (e) { console.error(e) }
+        const res = await fetch(`http://localhost:8000/papers/${id}`);
+        if (res.ok) this.paper = await res.json();
+      } catch (e) {
+        console.error(e);
+      }
     }
-    this.loading = false
+    this.loading = false;
   },
   methods: {
     formatDate(iso) {
-      return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      return new Date(iso).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
     },
   },
-}
+};
 </script>
 
 <style scoped>

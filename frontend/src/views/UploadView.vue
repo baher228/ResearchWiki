@@ -113,11 +113,14 @@ export default {
 
         const data = await res.json()
         this.progress = 100
-        this.statusText = 'Done!'
+        this.statusText = 'Done! Opening wiki page...'
 
-        sessionStorage.setItem('lastResult', JSON.stringify(data))
+        // Open the wiki article directly
+        const wikiUrl = data.html_url.startsWith('http')
+          ? data.html_url
+          : 'http://localhost:8000' + data.html_url
         setTimeout(() => {
-          this.$router.push({ name: 'result', params: { id: data.id } })
+          window.location.href = wikiUrl
         }, 400)
       } catch (err) {
         this.error = err.message
