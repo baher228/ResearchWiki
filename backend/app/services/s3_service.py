@@ -10,12 +10,14 @@ logger = logging.getLogger(__name__)
 
 def _get_client():
     settings = get_settings()
-    return boto3.client(
-        "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    kwargs = {
+        "region_name": settings.AWS_REGION,
+        "aws_access_key_id": settings.AWS_ACCESS_KEY_ID,
+        "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY,
+    }
+    if settings.AWS_SESSION_TOKEN:
+        kwargs["aws_session_token"] = settings.AWS_SESSION_TOKEN
+    return boto3.client("s3", **kwargs)
 
 
 def upload_file(local_path: str, s3_key: str, content_type: str = None) -> str:
@@ -25,7 +27,7 @@ def upload_file(local_path: str, s3_key: str, content_type: str = None) -> str:
     extra = {}
     if content_type:
         extra["ContentType"] = content_type
-    client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra)
+    client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
     logger.info("Uploaded %s → s3://%s/%s", local_path, settings.S3_BUCKET_NAME, s3_key)
     return s3_key
 
@@ -34,7 +36,12 @@ def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octe
     """Upload raw bytes to S3."""
     settings = get_settings()
     client = _get_client()
-    client.put_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key, Body=data, ContentType=content_type)
+    client.put_object(
+        Bucket=settings.S3_BUCKET_NAME,
+        Key=s3_key,
+        Body=data,
+        ContentType=content_type,
+    )
     logger.info("Uploaded bytes (%d) → s3://%s/%s", len(data), settings.S3_BUCKET_NAME, s3_key)
     return s3_key
 
@@ -45,7 +52,7 @@ def upload_directory(local_dir: str, s3_prefix: str) -> int:
     for fname in os.listdir(local_dir):
         fpath = os.path.join(local_dir, fname)
         if os.path.isfile(fpath):
-            ct = "image/png" if fname.endswith(".png") else None
+            ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
             upload_file(fpath, f"{s3_prefix}/{fname}", content_type=ct)
             count += 1
     return count

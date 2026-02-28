@@ -9,6 +9,7 @@ from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineRespo
 from app.services import mistral_service, s3_service
 from app.services.wiki_parser import parse_pdf_to_markdown
 from app.services.wiki_generator import generate_wiki_html
+from app.config import get_settings
 from app import database
 
 logger = logging.getLogger(__name__)
@@ -86,16 +87,28 @@ async def upload_paper(file: UploadFile = File(...)):
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        # 6. Upload to S3
-        s3_prefix = f"papers/{base_name}"
-        s3_pdf_key = s3_service.upload_file(tmp.name if os.path.exists(tmp.name) else "", f"{s3_prefix}/original.pdf", "application/pdf") if os.path.exists(tmp.name) else ""
+        # 6. Upload to S3 (optional — falls back to local)
+        s3_pdf_key = ""
+        s3_md_key = ""
+        s3_html_key = ""
+        s3_images_prefix = ""
+        html_url = f"/static/pages/{base_name}.html"
+        md_url = f"/static/markdowns/{base_name}.md"
 
-        # Upload PDF from bytes since temp may be deleted
-        s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
-        s3_md_key = s3_service.upload_file(md_path, f"{s3_prefix}/summary.md", "text/markdown")
-        s3_html_key = s3_service.upload_file(html_path, f"{s3_prefix}/wiki.html", "text/html")
-        s3_images_prefix = f"{s3_prefix}/images"
-        s3_service.upload_directory(images_dir, s3_images_prefix)
+        settings = get_settings()
+        if settings.S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID:
+            try:
+                s3_prefix = f"papers/{base_name}"
+                s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
+                s3_md_key = s3_service.upload_file(md_path, f"{s3_prefix}/summary.md", "text/markdown")
+                s3_html_key = s3_service.upload_file(html_path, f"{s3_prefix}/wiki.html", "text/html")
+                s3_images_prefix = f"{s3_prefix}/images"
+                s3_service.upload_directory(images_dir, s3_images_prefix)
+                html_url = s3_service.get_url(s3_html_key)
+                md_url = s3_service.get_url(s3_md_key)
+                logger.info("Uploaded to S3 successfully")
+            except Exception as s3_err:
+                logger.warning("S3 upload failed, using local files: %s", s3_err)
 
         # Clean up temp
         if os.path.exists(tmp.name):
@@ -117,8 +130,8 @@ async def upload_paper(file: UploadFile = File(...)):
             id=paper_id,
             title=title,
             markdown=summary_md,
-            html_url=s3_service.get_url(s3_html_key),
-            markdown_url=s3_service.get_url(s3_md_key),
+            html_url=html_url,
+            markdown_url=md_url,
             images_used=len(img_refs),
             images_extracted=len(image_files),
             created_at=created_at,
@@ -137,10 +150,15 @@ async def list_papers():
     """List all processed papers."""
     try:
         papers = database.get_all_papers()
-        # Add S3 URLs
         for p in papers:
-            p["html_url"] = s3_service.get_url(p["s3_html_key"]) if p.get("s3_html_key") else None
-            p["markdown_url"] = s3_service.get_url(p["s3_markdown_key"]) if p.get("s3_markdown_key") else None
+            if p.get("s3_html_key"):
+                p["html_url"] = s3_service.get_url(p["s3_html_key"])
+                p["markdown_url"] = s3_service.get_url(p["s3_markdown_key"]) if p.get("s3_markdown_key") else None
+            else:
+                # Fallback to local URLs
+                name = os.path.splitext(p.get("original_filename", ""))[0]
+                p["html_url"] = f"/static/pages/{name}.html"
+                p["markdown_url"] = f"/static/markdowns/{name}.md"
         return papers
     except Exception as exc:
         logger.exception("Failed to list papers")
@@ -150,16 +168,33 @@ async def list_papers():
 # ── GET /papers/{id} ────────────────────────────────────────────────────
 @router.get("/{paper_id}")
 async def get_paper(paper_id: str):
-    """Get a single paper by ID."""
+    """Get a single paper by ID, including its markdown content."""
     try:
         paper = database.get_paper_by_id(paper_id)
         if not paper:
             raise HTTPException(status_code=404, detail="Paper not found")
-        paper["html_url"] = s3_service.get_url(paper["s3_html_key"]) if paper.get("s3_html_key") else None
-        paper["markdown_url"] = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else None
+
+        name = os.path.splitext(paper.get("original_filename", ""))[0]
+
+        if paper.get("s3_html_key"):
+            paper["html_url"] = s3_service.get_url(paper["s3_html_key"])
+            paper["markdown_url"] = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else None
+        else:
+            paper["html_url"] = f"/static/pages/{name}.html"
+            paper["markdown_url"] = f"/static/markdowns/{name}.md"
+
+        # Load markdown content from disk so frontend can render preview
+        md_path = os.path.join(_MD_DIR, f"{name}.md")
+        if os.path.exists(md_path):
+            with open(md_path, "r", encoding="utf-8") as f:
+                paper["markdown"] = f.read()
+        else:
+            paper["markdown"] = ""
+
         return paper
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Failed to get paper")
         raise HTTPException(status_code=500, detail=str(exc))
+
