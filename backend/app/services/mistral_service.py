@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from app.config import get_settings
-from app.prompt import SYSTEM_PROMPT
+from app.prompt import BEGINNER_PROMPT
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ import re
 import shutil
 import tempfile
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
 from app.services import mistral_service, s3_service
@@ -21,6 +21,17 @@ router = APIRouter(prefix="/papers", tags=["Papers"])
 _ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
 _PAGES_DIR = os.path.join(_ASSETS_DIR, "pages")
 _MD_DIR = os.path.join(_ASSETS_DIR, "markdowns")
+
+def _upload_background_images(images_dir: str, s3_images_prefix: str, filenames: list[str]):
+    """Background task to upload unused images to S3 so we don't block the API response."""
+    for fname in filenames:
+        fpath = os.path.join(images_dir, fname)
+        if os.path.isfile(fpath):
+            ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
+            try:
+                s3_service.upload_file(fpath, f"{s3_images_prefix}/{fname}", content_type=ct, public=True)
+            except Exception as e:
+                logger.error("Failed to background upload %s: %s", fname, e)
 
 
 def _extract_title(markdown: str) -> str:
@@ -48,7 +59,7 @@ async def summarize_paper(request: SummarizeRequest):
 
 # ── POST /papers/upload ─────────────────────────────────────────────────
 @router.post("/upload", response_model=PipelineResponse)
-async def upload_paper(file: UploadFile = File(...)):
+async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Full pipeline: PDF → parse → summarize → HTML → S3 + DB."""
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -116,7 +127,19 @@ async def upload_paper(file: UploadFile = File(...)):
                 s3_prefix = f"papers/{base_name}"
                 s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
                 s3_images_prefix = f"{s3_prefix}/images"
-                s3_service.upload_directory(images_dir, s3_images_prefix, public=True)
+                
+                # Separate used vs unused images to optimize upload speed
+                used_filenames = [f for f in image_files if f in summary_md]
+                unused_filenames = [f for f in image_files if f not in summary_md]
+                
+                # Upload used images synchronously
+                for fname in used_filenames:
+                    fpath = os.path.join(images_dir, fname)
+                    ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
+                    s3_service.upload_file(fpath, f"{s3_images_prefix}/{fname}", content_type=ct, public=True)
+                
+                # Defer unused images to a background task
+                background_tasks.add_task(_upload_background_images, images_dir, s3_images_prefix, unused_filenames)
 
                 # Rewrite image URLs in markdown to point at S3
                 s3_images_base = s3_service.get_url(s3_images_prefix)
