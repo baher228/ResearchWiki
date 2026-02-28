@@ -1,5 +1,8 @@
 #TEST SCRIPT
 
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 import asyncio
 import json
 
@@ -19,7 +22,8 @@ async def main():
         ],
     )
 
-    print(response.choices[0].message.content)
+    content = response.choices[0].message.content
+    print(content.encode("utf-8", errors="replace").decode("utf-8"))
 
 if __name__ == "__main__":
     asyncio.run(main())

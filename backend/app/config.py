@@ -1,12 +1,12 @@
+import os
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from .env file."""
-
-    MISTRAL_API_KEY: str = ""
-    MISTRAL_MODEL: str = "mistral-large-latest"
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY")
+    MISTRAL_MODEL: str = "mistral-medium-latest"
 
     class Config:
         env_file = ".env"
@@ -15,5 +15,4 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Cached settings singleton."""
     return Settings()
