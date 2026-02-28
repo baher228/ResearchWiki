@@ -4,3 +4,7 @@ python-dotenv==1.0.1
 pydantic-settings==2.7.1
 mistralai==1.5.0
 python-multipart==0.0.20
+pymupdf
+pymupdf4llm
+markdown
+beautifulsoup4

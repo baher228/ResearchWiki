@@ -1,0 +1,257 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Lato, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    color: #202122;
+    background-color: #ffffff;
+    margin: 0;
+    padding: 0;
+    line-height: 1.6;
+}
+
+.wiki-header {
+    height: 50px;
+    background-color: #ffffff;
+    border-bottom: 1px solid #eaecf0;
+    display: flex;
+    align-items: center;
+    padding: 0 1.5em;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+}
+
+.header-logo {
+    width: 160px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.header-logo img {
+    height: 40px;
+    width: auto;
+    margin: 0 !important;
+    border: none !important;
+    padding: 0 !important;
+    background: none !important;
+}
+
+.header-logo-text {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Lato, Helvetica, Arial, sans-serif;
+    font-weight: 500;
+    font-size: 1.3em;
+    color: #000000;
+    margin-left: 0.5em;
+    letter-spacing: -0.5px;
+}
+
+.header-search {
+    margin-left: max(5%, 40px);
+    display: flex;
+    align-items: center;
+    width: 350px;
+}
+
+.header-search input {
+    width: 100%;
+    padding: 8px 16px;
+    border: 1px solid #a2a9b1;
+    border-radius: 20px;
+    font-size: 0.9em;
+    background-color: #f8f9fa;
+    transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.header-search input:focus {
+    outline: none;
+    border-color: #3366cc;
+    box-shadow: inset 0 0 0 1px #3366cc;
+    background-color: #ffffff;
+}
+
+.wiki-container {
+    display: flex;
+    margin: 50px auto 0 auto;
+    max-width: 1400px;
+    column-gap: 2em;
+}
+
+.wiki-sidebar {
+    width: 14em;
+    flex-shrink: 0;
+    padding: 1.25em 0 1.25em 0;
+    background-color: transparent;
+    height: calc(100vh - 50px);
+    position: sticky;
+    top: 50px;
+    overflow-y: auto;
+}
+
+.wiki-content {
+    flex-grow: 1;
+    padding: 2.5em 3em;
+    background-color: transparent;
+    max-width: 900px;
+    border: none;
+    min-height: calc(100vh - 50px);
+}
+
+.sidebar-header {
+    font-size: 1.1em;
+    font-weight: bold;
+    margin-bottom: 1em;
+    color: #54595d;
+    padding-bottom: 0.5em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: "Linux Libertine", "Georgia", "Times", serif;
+    font-weight: normal;
+    color: #000;
+    padding-bottom: 0.25em;
+    margin-bottom: 0.25em;
+    margin-top: 1.5em;
+}
+
+h1,
+h2 {
+    border-bottom: 1px solid #eaecf0;
+}
+
+h1 {
+    font-size: 2.2em;
+}
+
+h2 {
+    font-size: 1.8em;
+}
+
+h3 {
+    font-size: 1.5em;
+}
+
+h4 {
+    font-size: 1.25em;
+}
+
+a {
+    color: #3366cc;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+.toc {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    margin-bottom: 2em;
+    display: block;
+    font-size: 0.9em;
+    color: #202122;
+}
+
+.toc ul {
+    list-style-type: none;
+    padding-left: 1.5em;
+    margin: 0;
+}
+
+.toc>ul {
+    padding-left: 0;
+}
+
+.toc li {
+    margin-bottom: 0.5em;
+}
+
+.toc .toctitle {
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 0.5em;
+}
+
+.wiki-figure {
+    float: right;
+    clear: right;
+    margin: 0.5em 0 1.5em 1.5em;
+    background-color: #f8f9fa;
+    border: 1px solid #c8ccd1;
+    padding: 0.5em;
+    max-width: 350px;
+    font-size: 0.9em;
+}
+
+.wiki-figure img {
+    max-width: 100%;
+    border: 1px solid #c8ccd1;
+    margin: 0 auto 0.5em auto;
+    float: none;
+    padding: 0;
+    display: block;
+}
+
+.wiki-caption {
+    color: #54595d;
+    line-height: 1.4;
+    text-align: left;
+    padding-top: 0.25em;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #c8ccd1;
+    padding: 0.5em;
+    background-color: #f8f9fa;
+    display: block;
+    margin: 1.5em auto;
+}
+
+table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+}
+
+th,
+td {
+    border: 1px solid #a2a9b1;
+    padding: 0.5em;
+    text-align: left;
+}
+
+th {
+    background-color: #eaecf0;
+}
+
+code {
+    font-family: monospace;
+    background-color: #f8f9fa;
+    padding: 0.2em 0.4em;
+    border: 1px solid #eaecf0;
+    border-radius: 3px;
+}
+
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #eaecf0;
+    padding: 1em;
+    overflow-x: auto;
+}
+
+blockquote {
+    border-left: 3px solid #000;
+    margin: 1em 0;
+    padding-left: 1em;
+    color: #54595d;
+}
