@@ -11,19 +11,8 @@ class SummarizeRequest(BaseModel):
     )
 
 
-class WikiSection(BaseModel):
-    """A single section of the generated wiki page."""
-
-    title: str = Field(..., description="Section heading (e.g. 'Background', 'Methodology').")
-    content: str = Field(..., description="Markdown-formatted section body.")
-
-
 class SummarizeResponse(BaseModel):
-    """Structured wiki-style summary returned to the client."""
+    """Wiki-style markdown summary returned to the client."""
 
-    title: str = Field(..., description="A concise wiki-style title for the paper.")
-    summary: str = Field(..., description="A brief abstract / lead paragraph for the wiki page.")
-    sections: list[WikiSection] = Field(
-        default_factory=list,
-        description="Ordered list of wiki sections that break down the paper.",
-    )
+    title: str = Field(..., description="The paper title extracted from the markdown.")
+    markdown: str = Field(..., description="Full wiki-style markdown content.")
