@@ -2,6 +2,7 @@
 
 import os
 import logging
+from urllib.parse import quote
 import boto3
 from app.config import get_settings
 
@@ -63,4 +64,6 @@ def upload_directory(local_dir: str, s3_prefix: str, public: bool = False) -> in
 def get_url(s3_key: str) -> str:
     """Get the public URL for an S3 object."""
     settings = get_settings()
-    return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+    # URL-encode each path segment to handle spaces and special characters in S3 keys
+    encoded_key = "/".join(quote(segment, safe="") for segment in s3_key.split("/"))
+    return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{encoded_key}"

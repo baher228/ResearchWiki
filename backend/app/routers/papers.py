@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import tempfile
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 
@@ -44,9 +45,11 @@ def _normalize_name(name: str) -> str:
     return name
 
 
-def _find_existing_paper(filename: str, threshold: float = 0.85) -> str | None:
+def _find_existing_paper(filename: str, threshold: float = 0.8) -> str | None:
     """Return the ID of an already-processed paper whose filename closely matches filename."""
     normalized_new = _normalize_name(filename)
+    if not normalized_new:
+        return None
     try:
         rows = database.get_all_filenames()
     except Exception:
@@ -55,11 +58,14 @@ def _find_existing_paper(filename: str, threshold: float = 0.85) -> str | None:
     best_id = None
     for paper_id, existing_filename in rows:
         normalized_existing = _normalize_name(existing_filename or "")
+        if not normalized_existing:
+            continue
         ratio = difflib.SequenceMatcher(None, normalized_new, normalized_existing).ratio()
+        logger.debug("Fuzzy match '%s' vs '%s': ratio=%.4f", normalized_new, normalized_existing, ratio)
         if ratio > best_ratio:
             best_ratio = ratio
             best_id = paper_id
-    logger.debug("Fuzzy match for '%s': best ratio=%.2f (id=%s)", filename, best_ratio, best_id)
+    logger.debug("Best fuzzy match for '%s': ratio=%.2f (id=%s)", filename, best_ratio, best_id)
     return best_id if best_ratio >= threshold else None
 
 
@@ -98,14 +104,26 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
     existing_id = _find_existing_paper(file.filename)
     if existing_id:
         paper = database.get_paper_by_id(existing_id)
+        # Extra safety: confirm the matched paper's filename is actually close to the upload
         if paper:
-            name = os.path.splitext(paper.get("original_filename", ""))[0]
+            stored_name = _normalize_name(paper.get("original_filename") or "")
+            upload_name = _normalize_name(file.filename)
+            match_ratio = difflib.SequenceMatcher(None, upload_name, stored_name).ratio()
+            if match_ratio < 0.8:
+                logger.warning(
+                    "Dedup id=%s matched but ratio=%.2f is too low for '%s' vs '%s' — skipping cache",
+                    existing_id, match_ratio, file.filename, paper.get("original_filename"),
+                )
+                paper = None  # force re-processing
+        if paper:
+            name = os.path.splitext(os.path.basename(paper.get("original_filename", "")))[0]
             if paper.get("s3_html_key"):
                 html_url = s3_service.get_url(paper["s3_html_key"])
                 md_url = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else ""
             else:
-                html_url = f"/static/pages/{name}.html"
-                md_url = f"/static/markdowns/{name}.md"
+                encoded_name = quote(name, safe="/-_.")
+                html_url = f"/static/pages/{encoded_name}.html"
+                md_url = f"/static/markdowns/{encoded_name}.md"
             md_path = os.path.join(_MD_DIR, f"{name}.md")
             markdown = ""
             if os.path.exists(md_path):
@@ -125,7 +143,8 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     try:
         pdf_bytes = await file.read()
-        base_name = os.path.splitext(file.filename)[0]
+        # Use only the basename (strip any OS path prefix some browsers may include)
+        base_name = os.path.splitext(os.path.basename(file.filename))[0]
 
         # 1. Save PDF to temp using the original base_name so pymupdf4llm names
         #    extracted images as "{base_name}-{page}-{idx}.png" instead of random tmp names
@@ -174,8 +193,9 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
         s3_md_key = ""
         s3_html_key = ""
         s3_images_prefix = ""
-        html_url = f"/static/pages/{base_name}.html"
-        md_url = f"/static/markdowns/{base_name}.md"
+        encoded_base = quote(base_name, safe="/-_.")
+        html_url = f"/static/pages/{encoded_base}.html"
+        md_url = f"/static/markdowns/{encoded_base}.md"
         # markdown to return — starts with /static/ paths, upgraded to S3 URLs if available
         final_markdown = summary_for_html
 
@@ -266,9 +286,10 @@ async def list_papers():
                 p["markdown_url"] = s3_service.get_url(p["s3_markdown_key"]) if p.get("s3_markdown_key") else None
             else:
                 # Fallback to local URLs
-                name = os.path.splitext(p.get("original_filename", ""))[0]
-                p["html_url"] = f"/static/pages/{name}.html"
-                p["markdown_url"] = f"/static/markdowns/{name}.md"
+                name = os.path.splitext(os.path.basename(p.get("original_filename", "")))[0]
+                encoded_name = quote(name, safe="/-_.")
+                p["html_url"] = f"/static/pages/{encoded_name}.html"
+                p["markdown_url"] = f"/static/markdowns/{encoded_name}.md"
         return papers
     except Exception as exc:
         logger.exception("Failed to list papers")
@@ -284,14 +305,15 @@ async def get_paper(paper_id: str):
         if not paper:
             raise HTTPException(status_code=404, detail="Paper not found")
 
-        name = os.path.splitext(paper.get("original_filename", ""))[0]
+        name = os.path.splitext(os.path.basename(paper.get("original_filename", "")))[0]
 
         if paper.get("s3_html_key"):
             paper["html_url"] = s3_service.get_url(paper["s3_html_key"])
             paper["markdown_url"] = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else None
         else:
-            paper["html_url"] = f"/static/pages/{name}.html"
-            paper["markdown_url"] = f"/static/markdowns/{name}.md"
+            encoded_name = quote(name, safe="/-_.")
+            paper["html_url"] = f"/static/pages/{encoded_name}.html"
+            paper["markdown_url"] = f"/static/markdowns/{encoded_name}.md"
 
         # Load markdown content from disk so frontend can render preview
         md_path = os.path.join(_MD_DIR, f"{name}.md")

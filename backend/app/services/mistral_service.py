@@ -108,7 +108,7 @@ async def summarize_paper(text: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"text": f"[SYSTEM] {SYSTEM_PROMPT}\n\n[USER] {user_message}"}
+                    {"text": f"[SYSTEM] {BEGINNER_PROMPT}\n\n[USER] {user_message}"}
                 ],
             },
         ],
