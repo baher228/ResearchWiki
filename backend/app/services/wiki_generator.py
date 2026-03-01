@@ -169,34 +169,46 @@ def generate_wiki_html(md_texts, base_name, output_dir):
             font-style: italic;
         }}
         .slider-container {{
+            position: fixed;
+            top: 50%;
+            right: 20px;
+            transform: translateY(-50%);
             display: flex;
+            flex-direction: column;
             align-items: center;
-            margin-left: 20px;
             background: #f8f9fa;
-            padding: 5px 15px;
+            padding: 15px 10px;
             border-radius: 20px;
             border: 1px solid #a2a9b1;
+            z-index: 1000;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
         .slider-container label {{
-            margin-right: 10px;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            margin-bottom: 15px;
             font-weight: bold;
             font-size: 0.9em;
             color: #202122;
         }}
         .slider-container input[type="range"] {{
-            width: 150px;
+            height: 150px;
+            width: 8px;
+            writing-mode: vertical-lr;
+            direction: rtl;
+            -webkit-appearance: slider-vertical;
             cursor: pointer;
+            margin-bottom: 15px;
         }}
         .level-badge {{
             background: #3366cc;
             color: white;
             border-radius: 12px;
-            padding: 2px 8px;
+            padding: 4px 8px;
             font-size: 0.85em;
             font-weight: bold;
-            margin-left: 10px;
-            min-width: 16px;
             text-align: center;
+            min-width: 16px;
         }}
     </style>
 </head>
