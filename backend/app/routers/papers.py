@@ -176,6 +176,20 @@ async def summarize_paper(request: SummarizeRequest):
         raise HTTPException(status_code=500, detail=f"Summarization failed: {exc}")
 
 
+# ── POST /papers/description ──────────────────────────────────────────────
+@router.post("/description", response_model=SummarizeResponse)
+async def get_description(request: SummarizeRequest):
+    """Accept raw paper text and return a wiki-style markdown summary."""
+    try:
+        description = await description_service.get_description(request.text)
+        return SummarizeResponse(title="", markdown=description)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Summarization failed")
+        raise HTTPException(status_code=500, detail=f"Summarization failed: {exc}")
+
+
 # ── POST /papers/upload ─────────────────────────────────────────────────
 @router.post("/upload", response_model=PipelineResponse)
 async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = File(...)):

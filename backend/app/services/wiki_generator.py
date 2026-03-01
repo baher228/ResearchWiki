@@ -148,9 +148,45 @@ def generate_wiki_html(md_text, base_name, output_dir):
         }}
         .header-toggle.collapsed::before {{ transform: rotate(-90deg); }}
         .collapsed-content {{ display: none !important; }}
+        
+        .highlight-popup {{
+            position: absolute;
+            background-color: #fff;
+            color: #202122;
+            padding: 12px;
+            border: 1px solid #a2a9b1;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 350px;
+            z-index: 1000;
+            display: none;
+            font-size: 0.9em;
+            line-height: 1.5;
+            font-family: sans-serif;
+        }}
+        .highlight-popup .loading {{
+            color: #54595d;
+            font-style: italic;
+        }}
+        .highlight-popup-close {{
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            cursor: pointer;
+            color: #a2a9b1;
+            font-size: 1.2em;
+            line-height: 1;
+            font-weight: bold;
+        }}
+        .highlight-popup-close:hover {{ color: #202122; }}
     </style>
 </head>
 <body>
+    <div id="highlight-popup" class="highlight-popup">
+        <span class="highlight-popup-close" onclick="document.getElementById('highlight-popup').style.display='none'">&times;</span>
+        <div id="highlight-popup-content"></div>
+    </div>
+
     <div class="wiki-header">
         <div class="header-logo">
             <img src="{logo_src}" alt="Wikipedia Logo">
@@ -189,6 +225,61 @@ def generate_wiki_html(md_text, base_name, output_dir):
                         curr = curr.nextElementSibling;
                     }}
                 }});
+            }});
+
+            // Text Highlight Popup Logic
+            document.addEventListener('mouseup', function(e) {{
+                const popup = document.getElementById('highlight-popup');
+                if (popup.contains(e.target)) return;
+
+                const selection = window.getSelection();
+                const text = selection.toString().trim();
+                
+                if (text.length > 0) {{ 
+                    const range = selection.getRangeAt(0);
+                    const rect = range.getBoundingClientRect();
+                    
+                    popup.style.display = 'block';
+                    document.getElementById('highlight-popup-content').innerHTML = '<span class="loading">Generating description...</span>';
+                    
+                    const topPos = rect.top + window.scrollY - popup.offsetHeight - 10;
+                    popup.style.left = Math.max(10, rect.left + window.scrollX) + 'px';
+                    popup.style.top = Math.max(10, topPos) + 'px';
+                    
+                    const apiUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
+                        ? "http://localhost:8000/papers/description" 
+                        : "/papers/description";
+
+                    fetch(apiUrl, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ text: text }})
+                    }})
+                    .then(res => {{
+                        if (!res.ok) throw new Error("Network response was not ok");
+                        return res.json();
+                    }})
+                    .then(data => {{
+                        const contentDiv = document.getElementById('highlight-popup-content');
+                        contentDiv.innerText = data.markdown || "No description generated.";
+                        
+                        const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
+                        popup.style.top = Math.max(10, newTop) + 'px';
+                    }})
+                    .catch(err => {{
+                        console.error("Popup Error:", err);
+                        document.getElementById('highlight-popup-content').innerHTML = '<span style="color:red">Failed to generate description.</span>';
+                    }});
+                }} else {{
+                    popup.style.display = 'none';
+                }}
+            }});
+
+            document.addEventListener('mousedown', function(e) {{
+                const popup = document.getElementById('highlight-popup');
+                if (popup.style.display === 'block' && !popup.contains(e.target)) {{
+                    popup.style.display = 'none';
+                }}
             }});
         }});
     </script>
