@@ -16,6 +16,9 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     
     for idx, md_text in enumerate(md_texts):
         # Add a main title for the document if not present
+        if not md_text.lstrip().startswith("# "):
+            title_text = base_name.replace('_', ' ')
+            md_text = f"# {title_text}\n\n{md_text}"
             
         md = markdown.Markdown(extensions=['toc', 'tables', 'fenced_code'])
         html_content = md.convert(md_text)
@@ -216,7 +219,7 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
         <span id="level-display" class="level-badge">1</span>
     </div>
-    <div class="wiki-container" style="padding-top: 60px;">
+    <div class="wiki-container" style="padding-top: 80px;">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
             {tocs_html}

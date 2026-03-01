@@ -152,8 +152,8 @@ async def summarize_paper(text: str, system_prompt: str = PROMPT_1) -> str:
 
 async def generate_all_summaries(text: str) -> list[str]:
     """Generates 5 different complexity levels concurrently."""
-    # prompts = [PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5]
-    prompts = [PROMPT_1, PROMPT_3, PROMPT_5]
+    prompts = [PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5]
+    # prompts = [PROMPT_1, PROMPT_3, PROMPT_5]
     
     logger.info("Starting concurrent generation of 5 summary levels")
     tasks = [summarize_paper(text, system_prompt=p) for p in prompts]
