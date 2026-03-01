@@ -150,22 +150,12 @@ async def summarize_paper(text: str, system_prompt: str = PROMPT_1) -> str:
     return markdown_content
 
 
-async def generate_all_summaries(text: str, levels: int = 1) -> list[str]:
-    """Generates the requested number of complexity levels concurrently."""
+async def generate_all_summaries(text: str) -> list[str]:
+    """Generates 5 different complexity levels concurrently."""
+    # prompts = [PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5]
+    prompts = [PROMPT_1, PROMPT_3, PROMPT_5]
     
-    level_map = {
-        1: [PROMPT_3],
-        2: [PROMPT_2, PROMPT_4],
-        3: [PROMPT_1, PROMPT_3, PROMPT_5],
-        4: [PROMPT_1, PROMPT_2, PROMPT_4, PROMPT_5],
-        5: [PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5]
-    }
-    
-    # Strictly bound between 1-5 just in case
-    levels = max(1, min(5, levels))
-    prompts = level_map[levels]
-    
-    logger.info("Starting concurrent generation of %d summary levels", levels)
+    logger.info("Starting concurrent generation of 5 summary levels")
     tasks = [summarize_paper(text, system_prompt=p) for p in prompts]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     

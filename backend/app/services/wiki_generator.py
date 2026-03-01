@@ -16,6 +16,8 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     
     for idx, md_text in enumerate(md_texts):
         # Add a main title for the document if not present
+        if not md_text.lstrip().startswith("# "):
+            md_text = f"# {base_name.replace('_', ' ')}\n\n" + md_text
             
         md = markdown.Markdown(extensions=['toc', 'tables', 'fenced_code'])
         html_content = md.convert(md_text)
@@ -139,7 +141,7 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{base_name}</title>
     <style>
-        body {{ margin: 0; padding: 0; overflow: hidden; }}
+        body {{ margin: 0; padding: 0; overflow-x: hidden; overflow-y: auto; }}
         {css_content}
         .header-toggle {{ cursor: pointer; user-select: none; }}
         .header-toggle::before {{
@@ -148,6 +150,15 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         }}
         .header-toggle.collapsed::before {{ transform: rotate(-90deg); }}
         .collapsed-content {{ display: none !important; }}
+        
+        .toc-toggle {{
+            cursor: pointer; user-select: none; font-size: 0.7em; color: #54595d;
+            display: inline-block; margin-right: 6px; transition: transform 0.2s;
+            vertical-align: middle;
+        }}
+        .toc-toggle::before {{ content: '▼'; }}
+        .toc-toggle.collapsed {{ transform: rotate(-90deg); }}
+        .collapsed-toc {{ display: none !important; }}
         
         .highlight-popup {{
             position: absolute;
@@ -179,6 +190,7 @@ def generate_wiki_html(md_texts, base_name, output_dir):
             padding: 10px 20px;
             border-radius: 20px;
             border: 1px solid #a2a9b1;
+            border-radius: 20px;
             z-index: 1000;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             gap: 15px;
@@ -197,9 +209,10 @@ def generate_wiki_html(md_texts, base_name, output_dir):
             background: #3366cc;
             color: white;
             border-radius: 12px;
-            padding: 4px 8px;
+            padding: 2px 8px;
             font-size: 0.85em;
             font-weight: bold;
+            margin-left: 15px;
             text-align: center;
             min-width: 16px;
         }}
@@ -213,9 +226,10 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     <div class="slider-container" style="display: {'none' if len(md_texts) <= 1 else 'flex'};">
         <label for="level-slider">Complexity Level</label>
         <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
+        <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
         <span id="level-display" class="level-badge">1</span>
     </div>
-    <div class="wiki-container">
+    <div class="wiki-container" style="padding-top: 150px;">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
             {tocs_html}
@@ -264,6 +278,24 @@ def generate_wiki_html(md_texts, base_name, output_dir):
                         curr = curr.nextElementSibling;
                     }}
                 }});
+            }});
+
+            // Add arrows to TOC nested lists
+            const tocItems = document.querySelectorAll('.wiki-sidebar .toc li');
+            tocItems.forEach(li => {{
+                const nestedUl = li.querySelector('ul');
+                if (nestedUl) {{
+                    const toggle = document.createElement('span');
+                    toggle.className = 'toc-toggle';
+                    // Insert before the <a> tag
+                    li.insertBefore(toggle, li.firstChild);
+                    
+                    toggle.addEventListener('click', function(e) {{
+                        e.stopPropagation();
+                        nestedUl.classList.toggle('collapsed-toc');
+                        this.classList.toggle('collapsed');
+                    }});
+                }}
             }});
 
             // Text Highlight Popup Logic
