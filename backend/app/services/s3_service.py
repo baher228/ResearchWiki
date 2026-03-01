@@ -29,26 +29,11 @@ def upload_file(local_path: str, s3_key: str, content_type: str = None, public: 
     extra = {}
     if content_type:
         extra["ContentType"] = content_type
-    if public:
-        extra["ACL"] = "public-read"
-    try:
-        client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
-    except ClientError as err:
-        err_code = (err.response or {}).get("Error", {}).get("Code", "")
-        if public and err_code == "AccessControlListNotSupported":
-            logger.warning("Bucket has ACLs disabled; retrying upload without ACL for key '%s'", s3_key)
-            extra.pop("ACL", None)
-            client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
-        else:
-            raise
-    except Exception as err:
-        # boto3.s3.transfer may wrap the underlying ClientError as S3UploadFailedError
-        if public and "AccessControlListNotSupported" in str(err):
-            logger.warning("Bucket has ACLs disabled; retrying upload without ACL for key '%s'", s3_key)
-            extra.pop("ACL", None)
-            client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
-        else:
-            raise
+    
+    # Note: We no longer send ACL="public-read" because the bucket has ACLs disabled 
+    # (Object Ownership: Bucket owner enforced). 
+    # Public access is handled via the S3 Bucket Policy instead.
+    client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
     logger.info("Uploaded %s → s3://%s/%s", local_path, settings.S3_BUCKET_NAME, s3_key)
     return s3_key
 
@@ -63,19 +48,11 @@ def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octe
         "Body": data,
         "ContentType": content_type,
     }
-    if public:
-        kwargs["ACL"] = "public-read"
-
-    try:
-        client.put_object(**kwargs)
-    except ClientError as err:
-        err_code = (err.response or {}).get("Error", {}).get("Code", "")
-        if public and err_code == "AccessControlListNotSupported":
-            logger.warning("Bucket has ACLs disabled; retrying put_object without ACL for key '%s'", s3_key)
-            kwargs.pop("ACL", None)
-            client.put_object(**kwargs)
-        else:
-            raise
+    
+    # Note: We no longer send ACL="public-read" because the bucket has ACLs disabled 
+    # (Object Ownership: Bucket owner enforced). 
+    # Public access is handled via the S3 Bucket Policy instead.
+    client.put_object(**kwargs)
     logger.info("Uploaded bytes (%d) → s3://%s/%s", len(data), settings.S3_BUCKET_NAME, s3_key)
     return s3_key
 

@@ -234,7 +234,10 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
                 )
 
         # Use only the basename (strip any OS path prefix some browsers may include)
-        base_name = os.path.splitext(os.path.basename(file.filename))[0]
+        raw_name = os.path.splitext(os.path.basename(file.filename))[0]
+        # Make the basename safe for filesystem and URLs
+        base_name = re.sub(r'[\s]+', '_', raw_name)
+        base_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '', base_name)
 
         # 1. Save PDF to temp using the original base_name so pymupdf4llm names
         #    extracted images as "{base_name}-{page}-{idx}.png" instead of random tmp names

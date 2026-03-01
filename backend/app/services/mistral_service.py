@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from app.config import get_settings
-from app.prompt import BEGINNER_PROMPT
+from app.prompt import BEGINNER_PROMPT, SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _build_image_list_text(images: list[dict]) -> str:
     for img in images:
         fig_match = re.search(r'(?:Figure|Fig\.?)\s+(\d+)', img["context"], re.IGNORECASE)
         fig_label = f"Figure {fig_match.group(1)}" if fig_match else f"Image {img['index'] + 1}"
-        parts.append(f"- FIGURE_{img['index']}: {fig_label}")
+        parts.append(f"- FIGURE_{img['index'] + 1}: {fig_label}")
         caption_lines = [l.strip() for l in img["context"].split("\n") if l.strip() and not l.strip().startswith("![")]
         if caption_lines:
             parts.append(f"  Context: {' '.join(caption_lines[:2])}")
@@ -67,7 +67,7 @@ def post_process_images(summary: str, images: list[dict]) -> str:
     """Replace image placeholders in the summary with actual image paths."""
     for img in images:
         # First, safely replace exact FIGURE_N placeholders using lambda to avoid escape char bugs
-        pattern_exact = r"\bFIGURE_" + str(img['index']) + r"\b"
+        pattern_exact = r"\bFIGURE_" + str(img['index'] + 1) + r"\b"
         summary = re.sub(pattern_exact, lambda m, p=img["path"]: p, summary)
         
         # Second, fallback for when Mistral hallucinates literal strings like `![Figure 1: X](path)`
@@ -129,7 +129,7 @@ async def summarize_paper(text: str) -> str:
             },
         ],
         system=[
-            {"text": BEGINNER_PROMPT}
+            {"text": SYSTEM_PROMPT}
         ],
         inferenceConfig={
             "temperature": 0.3,
