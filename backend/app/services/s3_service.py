@@ -78,4 +78,12 @@ def get_url(s3_key: str) -> str:
     settings = get_settings()
     # URL-encode each path segment to handle spaces and special characters in S3 keys
     encoded_key = "/".join(quote(segment, safe="") for segment in s3_key.split("/"))
-    return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{encoded_key}"
+    
+    # Check if bucket is in a different region and use exact subdomain to avoid 301 redirects
+    try:
+        loc = _get_client().get_bucket_location(Bucket=settings.S3_BUCKET_NAME).get('LocationConstraint')
+        region = loc if loc else settings.AWS_REGION
+    except Exception:
+        region = settings.AWS_REGION
+        
+    return f"https://{settings.S3_BUCKET_NAME}.s3.{region}.amazonaws.com/{encoded_key}"

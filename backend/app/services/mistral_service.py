@@ -35,7 +35,7 @@ def _extract_image_info(paper_text: str) -> list[dict]:
         match = re.search(r'!\[([^\]]*)\]\(([^)]+)\)', line)
         if match:
             alt_text = match.group(1)
-            path = match.group(2)
+            path = match.group(2).replace('\\', '/')
             context_start = max(0, i - 2)
             context_end = min(len(lines), i + 5)
             context = "\n".join(lines[context_start:context_end])
@@ -64,10 +64,26 @@ def _build_image_list_text(images: list[dict]) -> str:
 
 
 def post_process_images(summary: str, images: list[dict]) -> str:
-    """Replace FIGURE_N placeholders in the summary with actual image paths."""
+    """Replace image placeholders in the summary with actual image paths."""
     for img in images:
-        pattern = r"\bFIGURE_" + str(img['index']) + r"\b"
-        summary = re.sub(pattern, img["path"], summary)
+        # First, safely replace exact FIGURE_N placeholders using lambda to avoid escape char bugs
+        pattern_exact = r"\bFIGURE_" + str(img['index']) + r"\b"
+        summary = re.sub(pattern_exact, lambda m, p=img["path"]: p, summary)
+        
+        # Second, fallback for when Mistral hallucinates literal strings like `![Figure 1: X](path)`
+        fig_match = re.search(r'(?:Figure|Fig\.?)\s+(\d+)', img["context"], re.IGNORECASE)
+        num_str = fig_match.group(1) if fig_match else str(img['index'] + 1)
+        
+        def replace_hallucinated_path(match, p=img["path"]):
+            prefix, url = match.group(1), match.group(2)
+            # If literal `path` or `image_path` or it lacks any directory structure, replace it
+            if url.lower() in ["path", "image_path", "figure", "image"] or ("/" not in url and "\\" not in url):
+                return f"{prefix}({p})"
+            return match.group(0)
+            
+        pattern_fallback = r'(!\[(?:Figure|Fig\.?|Image)\s*' + num_str + r'[^\]]*\])\(([^)]+)\)'
+        summary = re.sub(pattern_fallback, replace_hallucinated_path, summary, flags=re.IGNORECASE)
+
     return summary
 
 

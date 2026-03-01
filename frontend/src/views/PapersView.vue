@@ -1,6 +1,11 @@
 <template>
   <div class="papers-page">
-    <h1 class="page-title">All Papers</h1>
+    <div class="header-row">
+      <h1 class="page-title">All Papers</h1>
+      <button @click="cleanDb" class="clean-db-btn" :disabled="cleaning">
+        {{ cleaning ? 'Cleaning...' : 'Clean DB' }}
+      </button>
+    </div>
     <p class="page-intro">
       A list of all research papers that have been processed into wiki-style summaries.
     </p>
@@ -43,6 +48,7 @@ export default {
     return {
       papers: [],
       loading: true,
+      cleaning: false,
     }
   },
   async created() {
@@ -64,14 +70,58 @@ export default {
     formatDate(iso) {
       return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     },
+    async cleanDb() {
+      if (!confirm('Are you sure you want to delete all papers from the database?')) return;
+      this.cleaning = true;
+      try {
+        const res = await fetch('http://localhost:8000/papers/', { method: 'DELETE' });
+        if (res.ok) {
+          const data = await res.json();
+          this.papers = [];
+          alert(data.message || 'Database cleaned successfully.');
+        } else {
+          alert('Failed to clean database.');
+        }
+      } catch (e) {
+        console.error(e);
+        alert('Error cleaning database.');
+      }
+      this.cleaning = false;
+    }
   },
 }
 </script>
 
 <style scoped>
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25em;
+}
+
 .page-title {
   font-size: 2em;
-  margin-bottom: 0.25em;
+  margin: 0;
+}
+
+.clean-db-btn {
+  background-color: #d33;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.clean-db-btn:hover:not(:disabled) {
+  background-color: #b22;
+}
+
+.clean-db-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .page-intro {
