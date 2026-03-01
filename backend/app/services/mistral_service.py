@@ -148,3 +148,84 @@ async def summarize_paper(text: str) -> str:
         logger.info("Replaced image placeholders with real paths")
 
     return markdown_content
+
+
+async def generate_linked_papers(source_title: str, source_markdown: str, candidates: list[dict], max_results: int = 5) -> list[dict]:
+    """Ask Mistral to find topically related candidate papers."""
+    settings = get_settings()
+
+    if not candidates:
+        return []
+
+    # Create a concise representation of candidates to fit in context window
+    candidates_text = ""
+    for c in candidates:
+        c_title = c.get("title") or "Untitled"
+        c_md = c.get("markdown") or ""
+        # take first 300 chars of markdown
+        c_snippet = c_md[:300].replace('\n', ' ') + "..." if len(c_md) > 300 else c_md.replace('\n', ' ')
+        candidates_text += f"- ID: {c['id']}\n  Title: {c_title}\n  Snippet: {c_snippet}\n\n"
+
+    source_snippet = source_markdown[:2000]
+
+    system_prompt = "You are an AI assistant that links research papers based on their topical similarity."
+    user_prompt = f"""Given the following source paper:
+Title: {source_title}
+Snippet: {source_snippet}
+
+And the following candidate papers:
+{candidates_text}
+
+Identify up to {max_results} candidate papers that are most topically related to the source paper. 
+Return ONLY a JSON array of objects, where each object has:
+- "id": the ID of the candidate paper (must exactly match one of the candidate IDs)
+- "relation_type": either "extends_or_compares" or "related_topic"
+- "score": a float between 0.0 and 1.0 representing the confidence of the link
+- "evidence": a short 1-sentence explanation of why they are related.
+
+Ensure the output is valid JSON."""
+
+    model_id = settings.MISTRAL_MODEL
+    client = _get_bedrock_client()
+
+    response = client.converse(
+        modelId=model_id,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"text": user_prompt}
+                ],
+            },
+        ],
+        system=[
+            {"text": system_prompt}
+        ],
+        inferenceConfig={
+            "temperature": 0.1,
+            "maxTokens": 2048,
+        },
+    )
+
+    output_text = response["output"]["message"]["content"][0]["text"]
+    try:
+        if "```json" in output_text:
+            output_text = output_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in output_text:
+            output_text = output_text.split("```")[1].split("```")[0].strip()
+        
+        related_data = json.loads(output_text)
+        if not isinstance(related_data, list):
+            related_data = []
+            
+        # Filter out hallucinated IDs
+        valid_ids = {c["id"] for c in candidates}
+        related_data = [r for r in related_data if r.get("id") in valid_ids]
+        
+        # Sort by score and limit
+        related_data.sort(key=lambda x: float(x.get("score", 0)), reverse=True)
+        return related_data[:max_results]
+    except Exception as e:
+        logger.error("Failed to parse Mistral linked papers output: %s", e)
+        return []
+

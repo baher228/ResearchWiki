@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
-from app.services import mistral_service, s3_service, paper_linker, description_service
+from app.services import mistral_service, s3_service, description_service
 from app.services.wiki_parser import parse_pdf_to_markdown
 from app.services.wiki_generator import generate_wiki_html
 from app.config import get_settings
@@ -125,40 +125,6 @@ def _load_cached_markdown_for_paper(paper: dict) -> str:
         return ""
 
 
-def _compute_and_store_links_for_paper(source_paper: dict, max_results: int = 5) -> list[dict]:
-    """Compute and persist linkage edges for one source paper."""
-    source_id = source_paper["id"]
-    source_title = source_paper.get("title") or "Untitled"
-    source_markdown = _load_cached_markdown_for_paper(source_paper)
-
-    all_papers = database.get_all_papers()
-    candidates = [paper for paper in all_papers if paper.get("id") != source_id]
-    related_papers = paper_linker.find_related_papers(
-        source_title=source_title,
-        source_markdown=source_markdown,
-        candidates=candidates,
-        max_results=max_results,
-        min_score=0.22,
-    )
-
-    database.insert_paper_links(source_id, related_papers)
-    for link in related_papers:
-        database.upsert_paper_link(
-            source_paper_id=link["id"],
-            target_paper_id=source_id,
-            relation_type=link.get("relation_type") or "related_topic",
-            score=float(link.get("score") or 0),
-            evidence=link.get("evidence") or "",
-        )
-
-    for item in related_papers:
-        target_row = next((paper for paper in candidates if paper.get("id") == item["id"]), None)
-        if target_row:
-            html_u, md_u = _paper_public_urls(target_row)
-            item["html_url"] = html_u
-            item["markdown_url"] = md_u
-
-    return related_papers
 
 
 # ── POST /papers/summarize ──────────────────────────────────────────────
@@ -334,18 +300,8 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             markdown="",
         )
 
-        # 8. Build and persist related-paper links (new -> existing and reverse)
+        # 8. Related papers generation is now asynchronous and triggered by the frontend
         related_papers = []
-        try:
-            source_row = {
-                "id": paper_id,
-                "title": title,
-                "original_filename": file.filename,
-            }
-            related_papers = _compute_and_store_links_for_paper(source_row, max_results=5)
-        except Exception as link_err:
-            logger.warning("Related-paper linkage generation failed for %s: %s", paper_id, link_err)
-            related_papers = []
 
         return PipelineResponse(
             id=paper_id,
@@ -429,5 +385,47 @@ async def get_paper_links(paper_id: str, limit: int = Query(default=20, ge=1, le
         raise
     except Exception as exc:
         logger.exception("Failed to get paper links")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── POST /papers/{id}/generate-links ───────────────────────────────────
+@router.post("/{paper_id}/generate-links")
+async def generate_paper_links(paper_id: str):
+    """Asynchronously generate related paper links using Mistral."""
+    try:
+        source_paper = database.get_paper_by_id(paper_id)
+        if not source_paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        
+        source_title = source_paper.get("title") or "Untitled"
+        source_markdown = _load_cached_markdown_for_paper(source_paper)
+
+        all_papers = database.get_all_papers()
+        candidates = [p for p in all_papers if p.get("id") != paper_id]
+
+        if not candidates:
+            return []
+
+        # Load candidate markdowns
+        for c in candidates:
+            c["markdown"] = _load_cached_markdown_for_paper(c)
+
+        related = await mistral_service.generate_linked_papers(source_title, source_markdown, candidates, max_results=5)
+
+        database.insert_paper_links(paper_id, related)
+        for link in related:
+            database.upsert_paper_link(
+                source_paper_id=link["id"],
+                target_paper_id=paper_id,
+                relation_type=link.get("relation_type") or "related_topic",
+                score=float(link.get("score") or 0),
+                evidence=link.get("evidence") or "",
+            )
+
+        return _hydrate_related_papers(paper_id, limit=5)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to generate links")
         raise HTTPException(status_code=500, detail=str(exc))
 

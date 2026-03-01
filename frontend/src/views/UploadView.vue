@@ -115,12 +115,10 @@ export default {
         this.progress = 100
         this.statusText = 'Done! Opening wiki page...'
 
-        // Open the wiki article directly
-        const wikiUrl = data.html_url.startsWith('http')
-          ? data.html_url
-          : 'http://localhost:8000' + data.html_url
+        // Navigate to the frontend result view and cache the data
+        sessionStorage.setItem('lastResult', JSON.stringify(data))
         setTimeout(() => {
-          window.location.href = wikiUrl
+          this.$router.push('/result/' + data.id)
         }, 400)
       } catch (err) {
         this.error = err.message

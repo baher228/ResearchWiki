@@ -53,6 +53,25 @@
         <span class="sep">|</span>
         <router-link to="/papers">All papers</router-link>
       </div>
+
+      <div class="linked-papers">
+        <h3>Linked Papers</h3>
+
+        <div v-if="generatingLinks" class="loading-links">
+          <p>Loading linked papers...</p>
+        </div>
+        <div v-else-if="paper.related_papers && paper.related_papers.length > 0">
+          <ul>
+            <li v-for="rp in paper.related_papers" :key="rp.id">
+              <router-link :to="'/result/' + rp.id">{{ rp.title }}</router-link>
+              <div class="evidence">Confidence: {{ rp.score }} — {{ rp.evidence }}</div>
+            </li>
+          </ul>
+        </div>
+        <div v-else>
+          <p class="empty-links">No linked papers found.</p>
+        </div>
+      </div>
     </div>
 
     <div v-else class="empty-state">
@@ -68,6 +87,7 @@ export default {
       paper: null,
       loading: true,
       tab: "preview",
+      generatingLinks: false,
     };
   },
   computed: {
@@ -104,13 +124,17 @@ export default {
       if (!id || data.id === id) {
         this.paper = data;
         this.loading = false;
+        this.checkAndGenerateLinks(this.paper.id);
         return;
       }
     }
     if (id) {
       try {
         const res = await fetch(`http://localhost:8000/papers/${id}`);
-        if (res.ok) this.paper = await res.json();
+        if (res.ok) {
+          this.paper = await res.json();
+          this.checkAndGenerateLinks(this.paper.id);
+        }
       } catch (e) {
         console.error(e);
       }
@@ -124,6 +148,31 @@ export default {
         day: "numeric",
         year: "numeric",
       });
+    },
+    async checkAndGenerateLinks(id) {
+      if (!this.paper.related_papers || this.paper.related_papers.length === 0) {
+        this.generatingLinks = true;
+        try {
+          const res = await fetch(`http://localhost:8000/papers/${id}/generate-links`, {
+            method: 'POST'
+          });
+          if (res.ok) {
+            this.paper.related_papers = await res.json();
+            const cached = sessionStorage.getItem("lastResult");
+            if (cached) {
+              const data = JSON.parse(cached);
+              if (data.id === id) {
+                data.related_papers = this.paper.related_papers;
+                sessionStorage.setItem("lastResult", JSON.stringify(data));
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Failed to generate links:", e);
+        } finally {
+          this.generatingLinks = false;
+        }
+      }
     },
   },
 };
@@ -285,5 +334,57 @@ export default {
   padding-top: 4em;
   text-align: center;
   color: #54595d;
+}
+
+.linked-papers {
+  margin-top: 2.5em;
+  padding-top: 1.5em;
+  border-top: 1px solid #eaecf0;
+}
+
+.linked-papers h3 {
+  font-family: "Linux Libertine", Georgia, Times, serif;
+  font-size: 1.4em;
+  margin-bottom: 0.75em;
+}
+
+.loading-links {
+  color: #72777d;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+.linked-papers ul {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.linked-papers li {
+  margin-bottom: 0.75em;
+  padding: 0.75em;
+  background-color: #f8f9fa;
+  border: 1px solid #eaecf0;
+  border-radius: 2px;
+}
+
+.linked-papers li a {
+  font-weight: 500;
+  text-decoration: none;
+  color: #3366cc;
+}
+
+.linked-papers li a:hover {
+  text-decoration: underline;
+}
+
+.evidence {
+  font-size: 0.85em;
+  color: #54595d;
+  margin-top: 0.35em;
+}
+
+.empty-links {
+  color: #72777d;
+  font-size: 0.9em;
 }
 </style>
