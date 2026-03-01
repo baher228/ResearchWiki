@@ -28,8 +28,6 @@ def upload_file(local_path: str, s3_key: str, content_type: str = None, public: 
     extra = {}
     if content_type:
         extra["ContentType"] = content_type
-    if public:
-        extra["ACL"] = "public-read"
     client.upload_file(local_path, settings.S3_BUCKET_NAME, s3_key, ExtraArgs=extra or None)
     logger.info("Uploaded %s → s3://%s/%s", local_path, settings.S3_BUCKET_NAME, s3_key)
     return s3_key
@@ -45,9 +43,6 @@ def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octe
         "Body": data,
         "ContentType": content_type,
     }
-    if public:
-        kwargs["ACL"] = "public-read"
-    
     client.put_object(**kwargs)
     logger.info("Uploaded bytes (%d) → s3://%s/%s", len(data), settings.S3_BUCKET_NAME, s3_key)
     return s3_key
