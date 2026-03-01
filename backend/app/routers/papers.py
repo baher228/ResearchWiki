@@ -71,15 +71,36 @@ def _remove_local_paper_artifacts(original_filename: str):
 
 def _paper_public_urls(paper: dict) -> tuple[str, str]:
     """Build public HTML/markdown URLs for a stored paper row."""
-    orig_filename = paper.get("original_filename") or ""
+    orig_filename = str(paper.get("original_filename") or "")
     name = os.path.splitext(os.path.basename(orig_filename))[0]
-    if paper.get("s3_html_key"):
-        html_url = s3_service.get_url(paper["s3_html_key"])
-        md_url = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else ""
-    else:
+    s3_html_key = paper.get("s3_html_key")
+    s3_md_key = paper.get("s3_markdown_key")
+
+    if isinstance(s3_html_key, str) and s3_html_key:
+        try:
+            html_url = s3_service.get_url(s3_html_key)
+        except Exception as exc:
+            logger.warning("Failed building HTML S3 URL for paper id=%s: %s", paper.get("id"), exc)
+            html_url = ""
+
+        if isinstance(s3_md_key, str) and s3_md_key:
+            try:
+                md_url = s3_service.get_url(s3_md_key)
+            except Exception as exc:
+                logger.warning("Failed building markdown S3 URL for paper id=%s: %s", paper.get("id"), exc)
+                md_url = ""
+        else:
+            md_url = ""
+
+        if html_url:
+            return html_url, md_url
+
+    if name:
         encoded_name = quote(name, safe="/-_.")
         html_url = f"/static/pages/{encoded_name}.html"
-        md_url = ""
+    else:
+        html_url = ""
+    md_url = ""
     return html_url, md_url
 
 
@@ -369,7 +390,11 @@ async def list_papers(q: Optional[str] = None):
     try:
         papers = database.get_all_papers(q)
         for p in papers:
-            p["html_url"], p["markdown_url"] = _paper_public_urls(p)
+            try:
+                p["html_url"], p["markdown_url"] = _paper_public_urls(p)
+            except Exception as row_err:
+                logger.warning("Failed to build URLs for paper id=%s: %s", p.get("id"), row_err)
+                p["html_url"], p["markdown_url"] = "", ""
         return papers
     except Exception as exc:
         logger.exception("Failed to list papers")
