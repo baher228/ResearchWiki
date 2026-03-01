@@ -251,10 +251,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             summary_md,
         )
 
-        # 6. Generate HTML (in-memory)
-        html_content = generate_wiki_html(summary_for_html, base_name, _PAGES_DIR)
-
-        # 7. Upload to S3 (required)
+        # 6. Upload to S3 (required)
         s3_pdf_key = ""
         s3_md_key = ""
         s3_html_key = ""
@@ -287,6 +284,9 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
                 rf'![\1]({s3_images_base}/\2)',
                 summary_for_html,
             )
+
+            # Generate HTML from final markdown so uploaded HTML references S3 image URLs
+            html_content = generate_wiki_html(final_markdown, base_name, _PAGES_DIR)
 
             s3_md_key = s3_service.upload_bytes(final_markdown.encode("utf-8"), f"{s3_prefix}/summary.md", "text/markdown", public=True)
             s3_html_key = s3_service.upload_bytes(html_content.encode("utf-8"), f"{s3_prefix}/wiki.html", "text/html", public=True)
