@@ -6,7 +6,7 @@
         <span class="header-logo-text">WikiResearch</span>
       </router-link>
       <div class="search-container">
-        <input type="text" placeholder="Search WikiResearch" class="search-bar" />
+        <input type="text" v-model="searchQuery" @keyup.enter="handleSearch" placeholder="Search WikiResearch" class="search-bar" />
       </div>
       <nav class="header-nav">
         <router-link to="/" class="header-link">Upload</router-link>
@@ -18,6 +18,25 @@
     </div>
   </div>
 </template>
+
+<script>
+export default {
+  data() {
+    return {
+      searchQuery: ''
+    }
+  },
+  methods: {
+    handleSearch() {
+      if (this.searchQuery.trim()) {
+        this.$router.push({ path: '/papers', query: { q: this.searchQuery.trim() } })
+      } else {
+        this.$router.push({ path: '/papers' })
+      }
+    }
+  }
+}
+</script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Linux+Libertine&display=swap');

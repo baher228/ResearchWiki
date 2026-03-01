@@ -8,6 +8,7 @@
     </div>
     <p class="page-intro">
       A list of all research papers that have been processed into wiki-style summaries.
+      <span v-if="$route.query.q"><br><strong>Showing results for: </strong>"{{ $route.query.q }}"</span>
     </p>
 
     <div v-if="loading" class="loading-state">Loading...</div>
@@ -52,13 +53,24 @@ export default {
     }
   },
   async created() {
-    try {
-      const res = await fetch('http://localhost:8000/papers/')
-      if (res.ok) this.papers = await res.json()
-    } catch (e) { console.error(e) }
-    this.loading = false
+    await this.fetchPapers();
+  },
+  watch: {
+    '$route.query.q': 'fetchPapers'
   },
   methods: {
+    async fetchPapers() {
+      this.loading = true;
+      try {
+        const q = this.$route.query.q || '';
+        const url = q ? `http://localhost:8000/papers/?q=${encodeURIComponent(q)}` : 'http://localhost:8000/papers/';
+        const res = await fetch(url);
+        if (res.ok) this.papers = await res.json();
+      } catch (e) {
+        console.error(e);
+      }
+      this.loading = false;
+    },
     openPaper(paper) {
       this.$router.push('/result/' + paper.id)
     },

@@ -337,10 +337,10 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
 # ── GET /papers ─────────────────────────────────────────────────────────
 @router.get("/")
-async def list_papers():
+async def list_papers(q: Optional[str] = None):
     """List all processed papers."""
     try:
-        papers = database.get_all_papers()
+        papers = database.get_all_papers(q)
         for p in papers:
             p["html_url"], p["markdown_url"] = _paper_public_urls(p)
         return papers

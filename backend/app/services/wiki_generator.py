@@ -170,8 +170,9 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         }}
         .slider-container {{
             position: fixed;
-            top: 20px;
-            right: 20px;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
             display: flex;
             flex-direction: row;
             align-items: center;
@@ -210,12 +211,12 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         <div id="highlight-popup-content"></div>
     </div>
 
-    <div class="slider-container" style="display: {'none' if len(md_texts) <= 1 else 'flex'};">
+    <div class="slider-container">
         <label for="level-slider">Complexity Level</label>
         <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
         <span id="level-display" class="level-badge">1</span>
     </div>
-    <div class="wiki-container">
+    <div class="wiki-container" style="padding-top: 60px;">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
             {tocs_html}
