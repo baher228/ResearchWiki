@@ -7,8 +7,10 @@ import shutil
 import tempfile
 import json
 from urllib.parse import quote
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query, Form
+from fastapi.responses import HTMLResponse
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
 from app.services import mistral_service, s3_service, description_service
@@ -168,6 +170,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
     try:
         pdf_bytes = await file.read()
         content_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        refresh_existing_paper_id: Optional[str] = None
 
         # ── Deduplication check (content hash only) ──
         existing_id = database.get_paper_id_by_content_hash(content_hash)
@@ -183,6 +186,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
                         "Skipping cache for '%s' because DB markdown is empty",
                         file.filename,
                     )
+                    refresh_existing_paper_id = paper["id"]
                     paper = None
 
             if paper:
@@ -300,18 +304,41 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         # 7. Save to database
-        paper_id, created_at = database.insert_paper(
-            title=title,
-            original_filename=file.filename,
-            s3_pdf_key=s3_pdf_key,
-            s3_markdown_key=s3_md_key,
-            s3_html_key=s3_html_key,
-            s3_images_prefix=s3_images_prefix,
-            images_extracted=len(image_files),
-            images_used=len(img_refs),
-            content_hash=content_hash,
-            markdown="",
-        )
+        if refresh_existing_paper_id:
+            updated = database.refresh_paper_storage(
+                paper_id=refresh_existing_paper_id,
+                title=title,
+                original_filename=file.filename,
+                s3_pdf_key=s3_pdf_key,
+                s3_markdown_key=s3_md_key,
+                s3_html_key=s3_html_key,
+                s3_images_prefix=s3_images_prefix,
+                images_extracted=len(image_files),
+                images_used=len(img_refs),
+                content_hash=content_hash,
+            )
+            if not updated:
+                raise HTTPException(status_code=500, detail="Failed to refresh existing paper metadata")
+
+            refreshed = database.get_paper_by_id(refresh_existing_paper_id)
+            if not refreshed:
+                raise HTTPException(status_code=500, detail="Refreshed paper not found")
+
+            paper_id = refresh_existing_paper_id
+            created_at = refreshed["created_at"]
+        else:
+            paper_id, created_at = database.insert_paper(
+                title=title,
+                original_filename=file.filename,
+                s3_pdf_key=s3_pdf_key,
+                s3_markdown_key=s3_md_key,
+                s3_html_key=s3_html_key,
+                s3_images_prefix=s3_images_prefix,
+                images_extracted=len(image_files),
+                images_used=len(img_refs),
+                content_hash=content_hash,
+                markdown="",
+            )
 
         # 8. Related papers generation is now asynchronous and triggered by the frontend
         related_papers = []
@@ -382,6 +409,44 @@ async def get_paper(paper_id: str):
         raise
     except Exception as exc:
         logger.exception("Failed to get paper")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── GET /papers/{id}/html ───────────────────────────────────────────────
+@router.get("/{paper_id}/html")
+async def get_paper_html(paper_id: str):
+    """Get the raw HTML content for a paper's wiki page."""
+    try:
+        paper = database.get_paper_by_id(paper_id)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        s3_html_key = paper.get("s3_html_key")
+        if s3_html_key:
+            html_content = s3_service.get_text(s3_html_key)
+            return HTMLResponse(content=html_content)
+        
+        # Fallback to local file if no S3 key is present
+        orig_filename = paper.get("original_filename") or ""
+        raw_name = os.path.splitext(os.path.basename(orig_filename))[0]
+        safe_name = re.sub(r'[\s]+', '_', raw_name)
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '', safe_name)
+
+        candidate_names = [raw_name]
+        if safe_name and safe_name != raw_name:
+            candidate_names.append(safe_name)
+
+        for candidate in candidate_names:
+            local_path = os.path.join(_PAGES_DIR, f"{candidate}.html")
+            if os.path.exists(local_path):
+                with open(local_path, "r", encoding="utf-8") as f:
+                    return HTMLResponse(content=f.read())
+        
+        raise HTTPException(status_code=404, detail="HTML content not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to get paper HTML")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

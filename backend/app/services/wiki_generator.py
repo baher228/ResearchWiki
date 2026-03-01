@@ -324,7 +324,7 @@ def generate_wiki_html(md_texts, base_name, output_dir):
                     // Since the HTML is hosted on S3 (HTTPS) and rendered in an iframe, Chrome blocks
                     // it from calling localhost API (HTTP) directly due to Mixed Content / PNA rules.
                     // Instead, we delegate the fetch out to the parent Vue application.
-                    window.parent.postMessage({ type: "explain", text: text }, "*");
+                    window.parent.postMessage({{ type: "explain", text: text }}, "*");
                     
                     // The incoming response will be handled by a message listener on the window
                 }} else {{

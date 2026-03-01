@@ -304,3 +304,42 @@ def update_paper_markdown(paper_id: str, markdown: str) -> bool:
     cur.close()
     conn.close()
     return updated
+
+
+def refresh_paper_storage(paper_id: str, title: str, original_filename: str,
+                          s3_pdf_key: str, s3_markdown_key: str, s3_html_key: str,
+                          s3_images_prefix: str, images_extracted: int,
+                          images_used: int, content_hash: str = "") -> bool:
+    """Refresh an existing paper row with latest generated storage artifacts."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE papers
+        SET title = %s,
+            original_filename = %s,
+            s3_pdf_key = %s,
+            s3_markdown_key = %s,
+            s3_html_key = %s,
+            s3_images_prefix = %s,
+            images_extracted = %s,
+            images_used = %s,
+            content_hash = COALESCE(NULLIF(%s, ''), content_hash),
+            markdown = ''
+        WHERE id = %s
+    """, (
+        title,
+        original_filename,
+        s3_pdf_key,
+        s3_markdown_key,
+        s3_html_key,
+        s3_images_prefix,
+        images_extracted,
+        images_used,
+        content_hash,
+        paper_id,
+    ))
+    updated = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return updated
