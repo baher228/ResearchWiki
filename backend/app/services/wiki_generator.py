@@ -8,9 +8,8 @@ def generate_wiki_html(md_text, base_name, output_dir):
     Converts Markdown text to a styled Wikipedia-like HTML page.
     Includes TOC extraction, figure repositioning, and collapsible sections.
     """
-    # Add a main title for the document if not present
-    if not md_text.lstrip().startswith("# "):
-        md_text = f"# {base_name.replace('_', ' ')}\n\n" + md_text
+    # We intentionally do NOT prepend the title here anymore because the Mistral summary
+    # typically provides its own title, or the frontend Vue wrapper handles it.
         
     print("Converting Markdown to HTML...")
     # Convert markdown to HTML with Table of Contents and Table support
@@ -125,12 +124,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
         with open(css_path, "r", encoding="utf-8") as f:
             css_content = f.read()
             
-    logo_path = os.path.join(pages_dir, "WikiResearch.png")
-    logo_src = "WikiResearch.png"
-    if os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            b64_img = base64.b64encode(f.read()).decode("utf-8")
-            logo_src = f"data:image/png;base64,{b64_img}"
+
             
     # Assembly with Template
     html_template = f"""<!DOCTYPE html>
@@ -140,6 +134,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{base_name}</title>
     <style>
+        body {{ margin: 0; padding: 0; overflow: hidden; }} /* Prevent double scrollbars in iframe */
         {css_content}
         .header-toggle {{ cursor: pointer; user-select: none; }}
         .header-toggle::before {{
@@ -175,15 +170,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
         <div id="highlight-popup-content"></div>
     </div>
 
-    <div class="wiki-header">
-        <div class="header-logo">
-            <img src="{logo_src}" alt="Wikipedia Logo">
-            <span class="header-logo-text">WikiResearch</span>
-        </div>
-        <div class="header-search">
-            <input type="text" placeholder="Search WikiResearch">
-        </div>
-    </div>
+
     <div class="wiki-container">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
@@ -307,6 +294,14 @@ def generate_wiki_html(md_text, base_name, output_dir):
                     popup.onclick = null;
                 }}
             }});
+
+            // Send dynamic height to parent wrapper (Vue)
+            function sendHeight() {{
+                const height = document.documentElement.scrollHeight;
+                window.parent.postMessage({{ type: 'resize', height: height }}, '*');
+            }}
+            window.addEventListener('load', sendHeight);
+            new ResizeObserver(sendHeight).observe(document.body);
         }});
     </script>
 </body>

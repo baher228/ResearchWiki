@@ -1,5 +1,5 @@
 <template>
-  <div class="upload-page">
+  <div class="upload-view">
     <h1 class="page-title">Upload a Research Paper</h1>
     <p class="page-intro">
       Upload a PDF of a research paper and ResearchWiki will generate a concise,
@@ -39,22 +39,26 @@
     <div class="info-section">
       <h2>How it works</h2>
       <table class="info-table">
-        <tr>
-          <th>Step</th>
-          <th>Description</th>
-        </tr>
-        <tr>
-          <td><strong>1. Parse</strong></td>
-          <td>The PDF is parsed to extract text, figures, and structure</td>
-        </tr>
-        <tr>
-          <td><strong>2. Summarize</strong></td>
-          <td>Mistral AI reads the paper and produces a concise wiki-style summary</td>
-        </tr>
-        <tr>
-          <td><strong>3. Generate</strong></td>
-          <td>A Wikipedia-formatted HTML page is generated with key figures included</td>
-        </tr>
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Parse</strong></td>
+            <td>The PDF is parsed to extract text, figures, and structure</td>
+          </tr>
+          <tr>
+            <td><strong>2. Summarize</strong></td>
+            <td>Mistral AI reads the paper and produces a concise wiki-style summary</td>
+          </tr>
+          <tr>
+            <td><strong>3. Generate</strong></td>
+            <td>A Wikipedia-formatted HTML page is generated with key figures included</td>
+          </tr>
+        </tbody>
       </table>
     </div>
   </div>
