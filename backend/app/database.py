@@ -114,11 +114,17 @@ def insert_paper(title, original_filename, s3_pdf_key, s3_markdown_key,
     return str(row[0]), row[1].isoformat()
 
 
-def get_all_papers():
-    """Return all papers, newest first."""
+def get_all_papers(q: str = None):
+    """Return all papers, newest first. Optionally filter by title."""
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM papers ORDER BY created_at DESC")
+    
+    if q:
+        search_pattern = f"%{q}%"
+        cur.execute("SELECT * FROM papers WHERE title ILIKE %s ORDER BY created_at DESC", (search_pattern,))
+    else:
+        cur.execute("SELECT * FROM papers ORDER BY created_at DESC")
+        
     rows = cur.fetchall()
     cur.close()
     conn.close()

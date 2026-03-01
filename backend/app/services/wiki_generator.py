@@ -181,7 +181,7 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         }}
         .slider-container {{
             position: fixed;
-            top: 65px;
+            top: 15px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
@@ -222,21 +222,12 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         <div id="highlight-popup-content"></div>
     </div>
 
-    <header class="wiki-header">
-        <a href="/" class="header-logo" style="text-decoration: none; color: inherit;">
-            <span class="header-logo-text" style="font-family: 'Linux Libertine', Georgia, Times, serif; font-size: 1.6em;">ResearchWiki</span>
-        </a>
-        <div class="header-search">
-            <input type="text" placeholder="Search ResearchWiki..." disabled>
-        </div>
-    </header>
-
     <div class="slider-container">
         <label for="level-slider">Complexity Level</label>
         <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
         <span id="level-display" class="level-badge">1</span>
     </div>
-    <div class="wiki-container" style="padding-top: 150px;">
+    <div class="wiki-container" style="padding-top: 60px;">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
             {tocs_html}
