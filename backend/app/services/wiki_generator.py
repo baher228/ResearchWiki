@@ -3,119 +3,122 @@ import re
 import markdown
 from bs4 import BeautifulSoup
 
-def generate_wiki_html(md_text, base_name, output_dir):
+def generate_wiki_html(md_texts, base_name, output_dir):
     """
-    Converts Markdown text to a styled Wikipedia-like HTML page.
-    Includes TOC extraction, figure repositioning, and collapsible sections.
+    Converts a list of Markdown texts to a styled Wikipedia-like HTML page.
+    Includes TOC extraction, figure repositioning, collapsible sections,
+    and a 5-level complexity slider.
     """
-    # Add a main title for the document if not present
-    if not md_text.lstrip().startswith("# "):
-        md_text = f"# {base_name.replace('_', ' ')}\n\n" + md_text
-        
-    print("Converting Markdown to HTML...")
-    # Convert markdown to HTML with Table of Contents and Table support
-    md = markdown.Markdown(extensions=['toc', 'tables', 'fenced_code'])
-    html_content = md.convert(md_text)
-    toc_html = md.toc
+    print("Converting Markdowns to HTML...")
     
-    # Post-process with BeautifulSoup for figure repositioning
-    soup = BeautifulSoup(html_content, "html.parser")
-    import fitz
+    all_tocs = []
+    all_contents = []
     
-    # 1. First extract all images and group them if adjacent
-    images = soup.find_all('img')
-    grouped_images = []
-    
-    current_group = []
-    for img in images:
-        if not current_group:
-            current_group.append(img)
-        else:
-            prev_img = current_group[-1]
-            p_curr = img.find_parent('p')
-            p_prev = prev_img.find_parent('p')
+    for idx, md_text in enumerate(md_texts):
+        # Add a main title for the document if not present
             
-            if p_curr and p_prev and p_curr == p_prev:
+        md = markdown.Markdown(extensions=['toc', 'tables', 'fenced_code'])
+        html_content = md.convert(md_text)
+        toc_html = md.toc
+        
+        # Post-process with BeautifulSoup for figure repositioning
+        soup = BeautifulSoup(html_content, "html.parser")
+        import fitz
+        
+        # 1. First extract all images and group them if adjacent
+        images = soup.find_all('img')
+        grouped_images = []
+        
+        current_group = []
+        for img in images:
+            if not current_group:
                 current_group.append(img)
-            elif p_curr and p_prev:
-                curr_node = p_prev.next_sibling
-                while curr_node and curr_node != p_curr:
-                    if curr_node.name and curr_node.name != 'br':
-                        break
-                    curr_node = curr_node.next_sibling
+            else:
+                prev_img = current_group[-1]
+                p_curr = img.find_parent('p')
+                p_prev = prev_img.find_parent('p')
                 
-                if curr_node == p_curr:
+                if p_curr and p_prev and p_curr == p_prev:
                     current_group.append(img)
+                elif p_curr and p_prev:
+                    curr_node = p_prev.next_sibling
+                    while curr_node and curr_node != p_curr:
+                        if curr_node.name and curr_node.name != 'br':
+                            break
+                        curr_node = curr_node.next_sibling
+                    
+                    if curr_node == p_curr:
+                        current_group.append(img)
+                    else:
+                        grouped_images.append(current_group)
+                        current_group = [img]
                 else:
                     grouped_images.append(current_group)
                     current_group = [img]
-            else:
-                grouped_images.append(current_group)
-                current_group = [img]
-                    
-    if current_group:
-        grouped_images.append(current_group)
+                        
+        if current_group:
+            grouped_images.append(current_group)
 
-    # 2. Process groups and assign CSS containers
-    for group in grouped_images:
-        # Determine insertion point
-        insertion_node = group[0].find_parent('p') or group[0]
-        
-        # Optional parent wrapper if multiple images
-        if len(group) > 1:
-            group_div = soup.new_tag(
-                "div", 
-                attrs={"class": "wiki-figure-group", "style": "display: flex; justify-content: center; gap: 1em; flex-wrap: wrap; margin: 1.5em auto;"}
-            )
-            insertion_node.insert_before(group_div)
-            container = group_div
-        else:
-            container = None
+        # 2. Process groups and assign CSS containers
+        for group in grouped_images:
+            # Determine insertion point
+            insertion_node = group[0].find_parent('p') or group[0]
             
-        for img in group:
-            p = img.find_parent('p')
-            
-            # Read true image width to constrain the container
-            img_width = None
-            src = img.get('src', '')
-            if os.path.exists(src):
-                try:
-                    px = fitz.Pixmap(src)
-                    img_width = px.width
-                    px = None
-                except Exception as e:
-                    print(f"Could not read image width for {src}: {e}")
-                    
-            # Set inline style to shrink the figure container to the image width
-            style = f"width: {img_width}px;" if img_width else "width: max-content;"
-            
-            figure_class = "wiki-figure center"
-            figure_div = soup.new_tag("div", attrs={"class": figure_class, "style": style})
-            
-            if container:
-                container.append(figure_div)
-                # clear vertical margins for flex items so they align nicely inside the flex row
-                figure_div['style'] += " margin: 0;"
+            # Optional parent wrapper if multiple images
+            if len(group) > 1:
+                group_div = soup.new_tag(
+                    "div", 
+                    attrs={"class": "wiki-figure-group", "style": "display: flex; justify-content: center; gap: 1em; flex-wrap: wrap; margin: 1.5em auto;"}
+                )
+                insertion_node.insert_before(group_div)
+                container = group_div
             else:
-                insertion_node.insert_before(figure_div)
-            
-            # Extract image from original location and put it in figure_div
-            figure_div.append(img.extract())
-            
-            # Extract caption from alt text
-            alt_text = img.get('alt', '').strip()
-            if alt_text:
-                caption_div = soup.new_tag("div", attrs={"class": "wiki-caption"})
-                caption_div.string = alt_text
-                figure_div.append(caption_div)
+                container = None
                 
-            # If the p is now empty, kill it
-            if p and not p.get_text(strip=True) and not p.find('img'):
-                p.decompose()
-            
-            
-    html_content = str(soup)
-    
+            for img in group:
+                p = img.find_parent('p')
+                
+                # Read true image width to constrain the container
+                img_width = None
+                src = img.get('src', '')
+                if os.path.exists(src):
+                    try:
+                        px = fitz.Pixmap(src)
+                        img_width = px.width
+                        px = None
+                    except Exception as e:
+                        print(f"Could not read image width for {src}: {e}")
+                        
+                # Set inline style to shrink the figure container to the image width
+                style = f"width: {img_width}px;" if img_width else "width: max-content;"
+                
+                figure_class = "wiki-figure center"
+                figure_div = soup.new_tag("div", attrs={"class": figure_class, "style": style})
+                
+                if container:
+                    container.append(figure_div)
+                    # clear vertical margins for flex items so they align nicely inside the flex row
+                    figure_div['style'] += " margin: 0;"
+                else:
+                    insertion_node.insert_before(figure_div)
+                
+                # Extract image from original location and put it in figure_div
+                figure_div.append(img.extract())
+                
+                # Extract caption from alt text
+                alt_text = img.get('alt', '').strip()
+                if alt_text:
+                    caption_div = soup.new_tag("div", attrs={"class": "wiki-caption"})
+                    caption_div.string = alt_text
+                    figure_div.append(caption_div)
+                    
+                # If the p is now empty, kill it
+                if p and not p.get_text(strip=True) and not p.find('img'):
+                    p.decompose()
+                
+        all_tocs.append(toc_html)
+        all_contents.append(str(soup))
+        
     # Load CSS and Logo
     import base64
     pages_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "pages"))
@@ -125,14 +128,10 @@ def generate_wiki_html(md_text, base_name, output_dir):
         with open(css_path, "r", encoding="utf-8") as f:
             css_content = f.read()
             
-    logo_path = os.path.join(pages_dir, "WikiResearch.png")
-    logo_src = "WikiResearch.png"
-    if os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            b64_img = base64.b64encode(f.read()).decode("utf-8")
-            logo_src = f"data:image/png;base64,{b64_img}"
-            
     # Assembly with Template
+    tocs_html = "".join([f'<div id="toc-{i+1}" class="wiki-toc-level" style="display: {"block" if i==0 else "none"};">{toc}</div>' for i, toc in enumerate(all_tocs)])
+    contents_html = "".join([f'<div id="content-{i+1}" class="wiki-content-level" style="display: {"block" if i==0 else "none"};">{content}</div>' for i, content in enumerate(all_contents)])
+    
     html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -140,6 +139,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{base_name}</title>
     <style>
+        body {{ margin: 0; padding: 0; overflow: hidden; }}
         {css_content}
         .header-toggle {{ cursor: pointer; user-select: none; }}
         .header-toggle::before {{
@@ -168,6 +168,36 @@ def generate_wiki_html(md_text, base_name, output_dir):
             color: #54595d;
             font-style: italic;
         }}
+        .slider-container {{
+            display: flex;
+            align-items: center;
+            margin-left: 20px;
+            background: #f8f9fa;
+            padding: 5px 15px;
+            border-radius: 20px;
+            border: 1px solid #a2a9b1;
+        }}
+        .slider-container label {{
+            margin-right: 10px;
+            font-weight: bold;
+            font-size: 0.9em;
+            color: #202122;
+        }}
+        .slider-container input[type="range"] {{
+            width: 150px;
+            cursor: pointer;
+        }}
+        .level-badge {{
+            background: #3366cc;
+            color: white;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
+            min-width: 16px;
+            text-align: center;
+        }}
     </style>
 </head>
 <body>
@@ -175,29 +205,45 @@ def generate_wiki_html(md_text, base_name, output_dir):
         <div id="highlight-popup-content"></div>
     </div>
 
-    <div class="wiki-header">
-        <div class="header-logo">
-            <img src="{logo_src}" alt="Wikipedia Logo">
-            <span class="header-logo-text">WikiResearch</span>
-        </div>
-        <div class="header-search">
-            <input type="text" placeholder="Search WikiResearch">
-        </div>
+    <div class="slider-container">
+        <label for="level-slider">Complexity Level</label>
+        <input type="range" id="level-slider" min="1" max="5" value="1">
+        <span id="level-display" class="level-badge">1</span>
     </div>
     <div class="wiki-container">
         <div class="wiki-sidebar">
             <div class="sidebar-header">Contents</div>
-            {toc_html}
+            {tocs_html}
         </div>
         <div class="wiki-content">
-            {html_content}
+            {contents_html}
         </div>
     </div>
     <script>
         document.addEventListener("DOMContentLoaded", function() {{
+            // Slider Logic
+            const slider = document.getElementById('level-slider');
+            const levelDisplay = document.getElementById('level-display');
+            
+            slider.addEventListener('input', function() {{
+                const level = this.value;
+                levelDisplay.innerText = level;
+                
+                // Hide all
+                document.querySelectorAll('.wiki-toc-level').forEach(el => el.style.display = 'none');
+                document.querySelectorAll('.wiki-content-level').forEach(el => el.style.display = 'none');
+                
+                // Show active
+                const activeToc = document.getElementById('toc-' + level);
+                const activeContent = document.getElementById('content-' + level);
+                if (activeToc) activeToc.style.display = 'block';
+                if (activeContent) activeContent.style.display = 'block';
+            }});
+
             const headings = document.querySelectorAll('.wiki-content h1, .wiki-content h2, .wiki-content h3, .wiki-content h4, .wiki-content h5, .wiki-content h6');
             headings.forEach(heading => {{
-                if (heading.tagName === 'H1' && heading === headings[0]) return;
+                // Only skip the first H1 within each content block
+                if (heading.tagName === 'H1' && !heading.previousElementSibling) return;
                 heading.classList.add('header-toggle');
                 heading.addEventListener('click', function() {{
                     this.classList.toggle('collapsed');
@@ -258,14 +304,18 @@ def generate_wiki_html(md_text, base_name, output_dir):
                         }} else {{
                             contentDiv.innerHTML = '<span class="loading">Generating description...</span>';
                         }}
+                        // re-position popup
+                        setTimeout(() => {{
+                            const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
+                            popup.style.top = Math.max(10, newTop) + 'px';
+                        }}, 0);
                     }};
                     
                     const topPos = rect.top + window.scrollY - popup.offsetHeight - 10;
                     popup.style.left = Math.max(10, rect.left + window.scrollX) + 'px';
                     popup.style.top = Math.max(10, topPos) + 'px';
                     
-                    // Since the HTML is hosted on S3 and rendered in an iframe, we need to explicitly call the local backend
-                    // You might need a more robust way to inject the backend URL in production.
+                    // Since the HTML is hosted on S3 and rendered in an iframe, explicitly call local backend
                     const apiUrl = "http://localhost:8000/papers/description";
 
                     fetch(apiUrl, {{
@@ -307,6 +357,13 @@ def generate_wiki_html(md_text, base_name, output_dir):
                     popup.onclick = null;
                 }}
             }});
+            
+            function sendHeight() {{
+                const height = document.documentElement.scrollHeight;
+                window.parent.postMessage({{ type: 'resize', height: height }}, '*');
+            }}
+            window.addEventListener('load', sendHeight);
+            new ResizeObserver(sendHeight).observe(document.body);
         }});
     </script>
 </body>

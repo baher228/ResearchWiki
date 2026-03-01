@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query
@@ -219,20 +220,25 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
         image_files = [f for f in os.listdir(images_dir) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
-        # 3. Mistral summarization
-        summary_md = await mistral_service.summarize_paper(raw_md)
-        title = _extract_title(summary_md)
-        img_refs = re.findall(r'!\[[^\]]*\]\([^)]+\)', summary_md)
+        # 3. Mistral summarization (5 levels concurrent)
+        summaries = await mistral_service.generate_all_summaries(raw_md)
+        title = _extract_title(summaries[0])
+        
+        combined_md = "\n".join(summaries)
+        img_refs = re.findall(r'!\[[^\]]*\]\([^)]+\)', combined_md)
 
         # 5. Rewrite image paths to browser-accessible /static/ URLs
         # The parser stores absolute paths like /app/app/assets/pages/NAME_images/img.png
         # We need them to be /static/pages/NAME_images/img.png
         images_rel = f"{base_name}_images"
-        summary_for_html = re.sub(
-            r'!\[([^\]]*)\]\([^)]*?' + re.escape(images_rel) + r'/([^)]+)\)',
-            rf'![\1](/static/pages/{images_rel}/\2)',
-            summary_md,
-        )
+        summaries_for_html = []
+        for smd in summaries:
+            s_html = re.sub(
+                r'!\[([^\]]*)\]\([^)]*?' + re.escape(images_rel) + r'/([^)]+)\)',
+                rf'![\1](/static/pages/{images_rel}/\2)',
+                smd,
+            )
+            summaries_for_html.append(s_html)
 
         # 6. Upload to S3 (required)
         s3_pdf_key = ""
@@ -242,7 +248,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
         html_url = ""
         md_url = ""
         # markdown to return — starts with /static/ paths, upgraded to S3 URLs if available
-        final_markdown = summary_for_html
+        final_markdown = summaries_for_html[0]
 
         settings = get_settings()
         if not (settings.S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID):
@@ -262,16 +268,23 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             # Rewrite image URLs in markdown to point at S3
             s3_images_base = s3_service.get_url(s3_images_prefix)
             images_rel = f"{base_name}_images"
-            final_markdown = re.sub(
-                r'!\[([^\]]*)\]\(/static/pages/' + re.escape(images_rel) + r'/([^)]+)\)',
-                rf'![\1]({s3_images_base}/\2)',
-                summary_for_html,
-            )
+            
+            final_summaries = []
+            for s_html in summaries_for_html:
+                f_md = re.sub(
+                    r'!\[([^\]]*)\]\(/static/pages/' + re.escape(images_rel) + r'/([^)]+)\)',
+                    rf'![\1]({s3_images_base}/\2)',
+                    s_html,
+                )
+                final_summaries.append(f_md)
 
-            # Generate HTML from final markdown so uploaded HTML references S3 image URLs
-            html_content = generate_wiki_html(final_markdown, base_name, _PAGES_DIR)
+            final_markdown = final_summaries[0]
 
-            s3_md_key = s3_service.upload_bytes(final_markdown.encode("utf-8"), f"{s3_prefix}/summary.md", "text/markdown", public=True)
+            # Generate HTML from final markdowns so uploaded HTML references S3 image URLs
+            html_content = generate_wiki_html(final_summaries, base_name, _PAGES_DIR)
+
+            summaries_json = json.dumps(final_summaries)
+            s3_md_key = s3_service.upload_bytes(summaries_json.encode("utf-8"), f"{s3_prefix}/summary.json", "application/json", public=True)
             s3_html_key = s3_service.upload_bytes(html_content.encode("utf-8"), f"{s3_prefix}/wiki.html", "text/html", public=True)
             html_url = s3_service.get_url(s3_html_key)
             md_url = s3_service.get_url(s3_md_key)

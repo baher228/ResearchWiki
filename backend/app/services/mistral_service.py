@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from app.config import get_settings
-from app.prompt import NEW_BEGINNER_PROMPT
+from app.prompt import PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ def _strip_markdown_fences(text: str) -> str:
     return text.strip()
 
 
-async def summarize_paper(text: str) -> str:
+async def summarize_paper(text: str, system_prompt: str = PROMPT_1) -> str:
     """Send paper text to Bedrock Mistral and return a wiki-style markdown summary."""
 
     settings = get_settings()
@@ -129,7 +129,7 @@ async def summarize_paper(text: str) -> str:
             },
         ],
         system=[
-            {"text": NEW_BEGINNER_PROMPT}
+            {"text": system_prompt}
         ],
         inferenceConfig={
             "temperature": 0.3,
@@ -148,6 +148,26 @@ async def summarize_paper(text: str) -> str:
         logger.info("Replaced image placeholders with real paths")
 
     return markdown_content
+
+
+async def generate_all_summaries(text: str) -> list[str]:
+    """Generates 5 different complexity levels concurrently."""
+    prompts = [PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5]
+    
+    logger.info("Starting concurrent generation of 5 summary levels")
+    tasks = [summarize_paper(text, system_prompt=p) for p in prompts]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Process results, replacing errors with a fallback message
+    processed_results = []
+    for i, res in enumerate(results):
+        if isinstance(res, Exception):
+            logger.error("Failed to generate summary level %d: %s", i + 1, res)
+            processed_results.append(f"# Level {i + 1} Summary Failed\n\nAn error occurred generating this summary level.\n\n`{str(res)}`")
+        else:
+            processed_results.append(res)
+            
+    return processed_results
 
 
 async def generate_linked_papers(source_title: str, source_markdown: str, candidates: list[dict], max_results: int = 5) -> list[dict]:

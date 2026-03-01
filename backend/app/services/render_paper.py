@@ -29,7 +29,7 @@ def main():
     if not os.path.exists(images_dir):
         os.makedirs(images_dir)
         
-    from app.services.mistral_service import summarize_paper
+    from app.services.mistral_service import generate_all_summaries
     import asyncio
 
     # Phase 1: Parsing
@@ -46,8 +46,8 @@ def main():
     print(f"Extracted {len(md_text)} chars of text.")
     print("Running Mistral summarization...")
     
-    # Phase 2: AI Summarization
-    summary_md = asyncio.run(summarize_paper(md_text))
+    # Phase 2: AI Summarization (5 levels)
+    summaries = asyncio.run(generate_all_summaries(md_text))
     
     mistral_md_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "mistral_markdowns"))
     if not os.path.exists(mistral_md_dir):
@@ -55,10 +55,10 @@ def main():
         
     summary_md_path = os.path.join(mistral_md_dir, f"{base_name}_SUMMARY.md")
     with open(summary_md_path, "w", encoding="utf-8") as f:
-        f.write(summary_md)
+        f.write("\n\n---\n\n".join(summaries))
     
     # Phase 3: Generating HTML
-    html_output = generate_wiki_html(summary_md, base_name, pages_dir)
+    html_output = generate_wiki_html(summaries, base_name, pages_dir)
     
     # Save Output
     output_html_path = os.path.join(pages_dir, f"{base_name}.html")
