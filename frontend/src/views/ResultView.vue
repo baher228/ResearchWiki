@@ -25,13 +25,14 @@
 
       <div class="article-preview-frame">
         <iframe
-          v-if="fullHtmlUrl"
-          :src="fullHtmlUrl"
+          v-if="htmlContent"
+          :srcdoc="htmlContent"
           class="wiki-iframe"
           :style="{ height: iframeHeight }"
           frameborder="0"
           scrolling="no"
         ></iframe>
+        <p v-else-if="loadingHtml" class="empty-state">Loading wiki page...</p>
         <p v-else class="empty-state">No preview available.</p>
       </div>
 
@@ -75,6 +76,8 @@ export default {
     return {
       paper: null,
       loading: true,
+      htmlContent: null,
+      loadingHtml: false,
       generatingLinks: false,
       iframeHeight: 'calc(100vh - 120px)',
     };
@@ -113,6 +116,7 @@ export default {
       if (!id || data.id === id) {
         this.paper = data;
         this.loading = false;
+        this.loadHtmlContent(this.paper.id);
         this.checkAndGenerateLinks(this.paper.id);
         return;
       }
@@ -122,6 +126,7 @@ export default {
         const res = await fetch(`http://localhost:8000/papers/${id}`);
         if (res.ok) {
           this.paper = await res.json();
+          this.loadHtmlContent(this.paper.id);
           this.checkAndGenerateLinks(this.paper.id);
         }
       } catch (e) {
@@ -137,9 +142,39 @@ export default {
     window.removeEventListener("message", this.handleMessage);
   },
   methods: {
-    handleMessage(event) {
+    async handleMessage(event) {
       if (event.data && event.data.type === "resize" && event.data.height) {
         this.iframeHeight = event.data.height + 20 + "px"; // add a small buffer
+      } else if (event.data && event.data.type === "explain" && event.data.text) {
+        try {
+          const res = await fetch("http://localhost:8000/papers/description", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: event.data.text })
+          });
+          if (!res.ok) throw new Error("Explanation request failed");
+          const data = await res.json();
+          event.source.postMessage({ type: "explanation_result", markdown: data.markdown }, "*");
+        } catch (err) {
+          console.error("Explanation error in Vue:", err);
+          event.source.postMessage({ type: "explanation_error" }, "*");
+        }
+      }
+    },
+    async loadHtmlContent(id) {
+      if (!id) return;
+      this.loadingHtml = true;
+      try {
+        const res = await fetch(`http://localhost:8000/papers/${id}/html`);
+        if (res.ok) {
+          this.htmlContent = await res.text();
+        } else {
+          console.error("Failed to fetch HTML content");
+        }
+      } catch (e) {
+        console.error("Error fetching HTML content:", e);
+      } finally {
+        this.loadingHtml = false;
       }
     },
     formatDate(iso) {

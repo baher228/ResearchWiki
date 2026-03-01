@@ -1,7 +1,7 @@
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -34,29 +34,32 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        if request.method == "OPTIONS":
-            response = JSONResponse(content={"message": "ok"})
-            if "Access-Control-Request-Private-Network" in request.headers:
-                response.headers["Access-Control-Allow-Private-Network"] = "true"
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS, PUT, DELETE"
-            response.headers["Access-Control-Allow-Headers"] = "*"
-            return response
-            
-        response = await call_next(request)
+@app.middleware("http")
+async def add_private_network_headers(request: Request, call_next):
+    # Intercept Private Network Access preflight requests aggressively
+    if request.method == "OPTIONS" and request.headers.get("access-control-request-private-network") == "true":
+        response = Response(status_code=204)
+        origin = request.headers.get("origin", "*")
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS, PUT, DELETE"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Private-Network"] = "true"
-        response.headers["Access-Control-Allow-Origin"] = "*"
         return response
-
-app.add_middleware(PrivateNetworkAccessMiddleware)
+        
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 # ---------------------------------------------------------------------------
 # Static files

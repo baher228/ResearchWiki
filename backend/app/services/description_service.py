@@ -32,7 +32,7 @@ async def get_description(text: str) -> str:
 
     settings = get_settings()
 
-    user_message = f"Summarize the following text into a description:\n\n{text}"
+    user_message = f"{DESCRIPTION_PROMPT.strip()}\n\nSummarize the following text into a description:\n\n{text}"
 
     model_id = settings.MISTRAL_FAST_MODEL
     logger.info("Sending text (%d chars) to Bedrock model %s", len(user_message), model_id)
@@ -49,9 +49,6 @@ async def get_description(text: str) -> str:
                     {"text": user_message}
                 ],
             },
-        ],
-        system=[
-            {"text": DESCRIPTION_PROMPT}
         ],
         inferenceConfig={
             "temperature": 0.3,
