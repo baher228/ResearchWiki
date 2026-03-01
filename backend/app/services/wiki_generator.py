@@ -170,35 +170,28 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         }}
         .slider-container {{
             position: fixed;
-            top: 50%;
+            top: 20px;
             right: 20px;
-            transform: translateY(-50%);
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
             background: #f8f9fa;
-            padding: 15px 10px;
+            padding: 10px 20px;
             border-radius: 20px;
             border: 1px solid #a2a9b1;
             z-index: 1000;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            gap: 15px;
         }}
         .slider-container label {{
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            margin-bottom: 15px;
             font-weight: bold;
             font-size: 0.9em;
             color: #202122;
         }}
         .slider-container input[type="range"] {{
-            height: 150px;
-            width: 8px;
-            writing-mode: vertical-lr;
-            direction: rtl;
-            -webkit-appearance: slider-vertical;
+            width: 200px;
+            height: 8px;
             cursor: pointer;
-            margin-bottom: 15px;
         }}
         .level-badge {{
             background: #3366cc;
@@ -217,9 +210,9 @@ def generate_wiki_html(md_texts, base_name, output_dir):
         <div id="highlight-popup-content"></div>
     </div>
 
-    <div class="slider-container">
+    <div class="slider-container" style="display: {'none' if len(md_texts) <= 1 else 'flex'};">
         <label for="level-slider">Complexity Level</label>
-        <input type="range" id="level-slider" min="1" max="5" value="1">
+        <input type="range" id="level-slider" min="1" max="{len(md_texts)}" value="1">
         <span id="level-display" class="level-badge">1</span>
     </div>
     <div class="wiki-container">
@@ -327,36 +320,12 @@ def generate_wiki_html(md_texts, base_name, output_dir):
                     popup.style.left = Math.max(10, rect.left + window.scrollX) + 'px';
                     popup.style.top = Math.max(10, topPos) + 'px';
                     
-                    // Since the HTML is hosted on S3 and rendered in an iframe, explicitly call local backend
-                    const apiUrl = "http://localhost:8000/papers/description";
-
-                    fetch(apiUrl, {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ text: text }})
-                    }})
-                    .then(res => {{
-                        if (!res.ok) throw new Error("Network response was not ok");
-                        return res.json();
-                    }})
-                    .then(data => {{
-                        descCache.text = data.markdown || "No description generated.";
-                        if (contentDiv.querySelector('.loading')) {{
-                            contentDiv.innerText = descCache.text;
-                            
-                            setTimeout(() => {{
-                                const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
-                                popup.style.top = Math.max(10, newTop) + 'px';
-                            }}, 0);
-                        }}
-                    }})
-                    .catch(err => {{
-                        console.error("Popup Error:", err);
-                        descCache.error = true;
-                        if (contentDiv.querySelector('.loading')) {{
-                            contentDiv.innerHTML = '<span style="color:red">Failed to generate description.</span>';
-                        }}
-                    }});
+                    // Since the HTML is hosted on S3 (HTTPS) and rendered in an iframe, Chrome blocks
+                    // it from calling localhost API (HTTP) directly due to Mixed Content / PNA rules.
+                    // Instead, we delegate the fetch out to the parent Vue application.
+                    window.parent.postMessage({{ type: "explain", text: text }}, "*");
+                    
+                    // The incoming response will be handled by a message listener on the window
                 }} else {{
                     popup.style.display = 'none';
                 }}
@@ -376,6 +345,36 @@ def generate_wiki_html(md_texts, base_name, output_dir):
             }}
             window.addEventListener('load', sendHeight);
             new ResizeObserver(sendHeight).observe(document.body);
+            // Listen for the explanation text coming back from Vue
+            window.addEventListener('message', function(event) {{
+                if (event.data && event.data.type === 'explanation_result') {{
+                    descCache.text = event.data.markdown || "No description generated.";
+                    
+                    const popup = document.getElementById('highlight-popup');
+                    const contentDiv = document.getElementById('highlight-popup-content');
+                    
+                    if (popup.style.display === 'block' && contentDiv.querySelector('.loading')) {{
+                        contentDiv.innerText = descCache.text;
+                        
+                        // Recalculate popup size/position
+                        setTimeout(() => {{
+                            const sel = window.getSelection();
+                            if (sel.rangeCount > 0) {{
+                                const rect = sel.getRangeAt(0).getBoundingClientRect();
+                                const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
+                                popup.style.top = Math.max(10, newTop) + 'px';
+                            }}
+                        }}, 0);
+                    }}
+                }} else if (event.data && event.data.type === 'explanation_error') {{
+                    descCache.error = true;
+                    const popup = document.getElementById('highlight-popup');
+                    const contentDiv = document.getElementById('highlight-popup-content');
+                    if (popup.style.display === 'block' && contentDiv.querySelector('.loading')) {{
+                        contentDiv.innerHTML = '<span style="color:red">Failed to generate description.</span>';
+                    }}
+                }}
+            }});
         }});
     </script>
 </body>

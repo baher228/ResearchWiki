@@ -31,6 +31,25 @@
         <p class="upload-hint">Supported: Research papers in PDF format</p>
       </div>
     </div>
+    
+    <div class="settings-panel">
+      <div class="complexity-selector">
+        <label for="complexity-slider">
+          <strong>Generate Multiple Complexities:</strong> {{ selectedLevels }} 
+          <span v-if="selectedLevels === 1">(Default)</span>
+          <span v-else>(Levels generated)</span>
+        </label>
+        <input 
+          id="complexity-slider" 
+          type="range" 
+          min="1" 
+          max="5" 
+          v-model.number="selectedLevels" 
+          class="slider"
+        />
+        <p class="setting-hint">Higher values take longer but generate multiple reading levels to switch between.</p>
+      </div>
+    </div>
 
     <div v-if="error" class="notice notice-error">
       <strong>Error:</strong> {{ error }}
@@ -58,7 +77,12 @@
             <td><strong>3. Generate</strong></td>
             <td>A Wikipedia-formatted HTML page is generated with key figures included</td>
           </tr>
+          <tr>
+            <td><strong>4. Link</strong></td>
+            <td>Related papers are extracted and linked</td>
+          </tr>
         </tbody>
+        
       </table>
     </div>
   </div>
@@ -73,6 +97,7 @@ export default {
       progress: 0,
       statusText: '',
       error: null,
+      selectedLevels: 1,
     }
   },
   methods: {
@@ -97,6 +122,7 @@ export default {
 
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('levels', this.selectedLevels)
 
       try {
         this.progress = 20
@@ -249,5 +275,51 @@ export default {
 .info-table th {
   background-color: #eaecf0;
   font-weight: bold;
+}
+
+.settings-panel {
+  background-color: #f8f9fa;
+  border: 1px solid #a2a9b1;
+  border-radius: 2px;
+  padding: 1.5em;
+  margin-bottom: 2em;
+}
+
+.complexity-selector label {
+  display: block;
+  margin-bottom: 0.5em;
+  font-size: 1.1em;
+}
+
+.setting-hint {
+  font-size: 0.85em;
+  color: #72777d;
+  margin-top: 0.5em;
+}
+
+.slider {
+  -webkit-appearance: none;
+  width: 100%;
+  max-width: 400px;
+  height: 8px;
+  border-radius: 4px;
+  background: #eaecf0;
+  outline: none;
+  margin: 1em 0;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3366cc;
+  cursor: pointer;
+  transition: background 0.15s ease-in-out;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: #2a4b8d;
 }
 </style>
