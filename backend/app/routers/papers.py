@@ -159,7 +159,7 @@ async def get_description(request: SummarizeRequest):
 
 # ── POST /papers/upload ─────────────────────────────────────────────────
 @router.post("/upload", response_model=PipelineResponse)
-async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = File(...), levels: int = Form(1)):
+async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Full pipeline: PDF → parse → summarize → HTML → S3 + DB."""
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -220,8 +220,8 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
         image_files = [f for f in os.listdir(images_dir) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
-        # 3. Mistral summarization (concurrent mapping based on selected levels)
-        summaries = await mistral_service.generate_all_summaries(raw_md, levels=levels)
+        # 3. Mistral summarization (concurrent mapping)
+        summaries = await mistral_service.generate_all_summaries(raw_md)
         title = _extract_title(summaries[0])
         
         combined_md = "\n".join(summaries)
@@ -385,38 +385,7 @@ async def get_paper(paper_id: str):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ── GET /{paper_id}/html ────────────────────────────────────────────────
-@router.get("/{paper_id}/html")
-async def get_paper_html(paper_id: str):
-    """Proxy the raw HTML content from S3 (or local) for frontend iframe srcdoc."""
-    try:
-        paper = database.get_paper_by_id(paper_id)
-        if not paper:
-            raise HTTPException(status_code=404, detail="Paper not found")
-
-        s3_html_key = paper.get("s3_html_key")
-        if s3_html_key:
-            html_content = s3_service.get_text(s3_html_key)
-            # Return as text/html
-            from fastapi import Response
-            return Response(content=html_content, media_type="text/html")
-        else:
-            orig_filename = paper.get("original_filename") or ""
-            name = os.path.splitext(os.path.basename(orig_filename))[0]
-            encoded_name = quote(name, safe="/-_.")
-            
-            # Local fallback
-            local_path = os.path.join(_PAGES_DIR, f"{encoded_name}.html")
-            if os.path.exists(local_path):
-                with open(local_path, "r", encoding="utf-8") as f:
-                    return Response(content=f.read(), media_type="text/html")
-            raise HTTPException(status_code=404, detail="HTML file not found")
-            
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to get paper HTML")
-        raise HTTPException(status_code=500, detail=str(exc))
+# ── GET /papers/{id}/links ─────────────────────────────────────────────
 @router.get("/{paper_id}/links")
 async def get_paper_links(paper_id: str, limit: int = Query(default=20, ge=1, le=100)):
     """Get related paper links for one paper."""
