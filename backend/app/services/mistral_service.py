@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from app.config import get_settings
-from app.prompt import BEGINNER_PROMPT
+from app.prompt import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +108,12 @@ async def summarize_paper(text: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"text": f"[SYSTEM] {BEGINNER_PROMPT}\n\n[USER] {user_message}"}
+                    {"text": user_message}
                 ],
             },
+        ],
+        system=[
+            {"text": SYSTEM_PROMPT}
         ],
         inferenceConfig={
             "temperature": 0.3,

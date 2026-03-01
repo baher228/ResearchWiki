@@ -35,18 +35,30 @@ def upload_file(local_path: str, s3_key: str, content_type: str = None, public: 
     return s3_key
 
 
-def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octet-stream") -> str:
+def upload_bytes(data: bytes, s3_key: str, content_type: str = "application/octet-stream", public: bool = False) -> str:
     """Upload raw bytes to S3."""
     settings = get_settings()
     client = _get_client()
-    client.put_object(
-        Bucket=settings.S3_BUCKET_NAME,
-        Key=s3_key,
-        Body=data,
-        ContentType=content_type,
-    )
+    kwargs = {
+        "Bucket": settings.S3_BUCKET_NAME,
+        "Key": s3_key,
+        "Body": data,
+        "ContentType": content_type,
+    }
+    if public:
+        kwargs["ACL"] = "public-read"
+    
+    client.put_object(**kwargs)
     logger.info("Uploaded bytes (%d) → s3://%s/%s", len(data), settings.S3_BUCKET_NAME, s3_key)
     return s3_key
+
+
+def get_text(s3_key: str) -> str:
+    """Get text content of an S3 object."""
+    settings = get_settings()
+    client = _get_client()
+    response = client.get_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
+    return response["Body"].read().decode("utf-8")
 
 
 def upload_directory(local_dir: str, s3_prefix: str, public: bool = False) -> int:

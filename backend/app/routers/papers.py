@@ -1,4 +1,5 @@
 import difflib
+import hashlib
 import logging
 import os
 import re
@@ -6,10 +7,10 @@ import shutil
 import tempfile
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
-from app.services import mistral_service, s3_service
+from app.services import mistral_service, s3_service, paper_linker
 from app.services.wiki_parser import parse_pdf_to_markdown
 from app.services.wiki_generator import generate_wiki_html
 from app.config import get_settings
@@ -24,18 +25,6 @@ _ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ass
 _PAGES_DIR = os.path.join(_ASSETS_DIR, "pages")
 _MD_DIR = os.path.join(_ASSETS_DIR, "markdowns")
 
-def _upload_background_images(images_dir: str, s3_images_prefix: str, filenames: list[str]):
-    """Background task to upload unused images to S3 so we don't block the API response."""
-    for fname in filenames:
-        fpath = os.path.join(images_dir, fname)
-        if os.path.isfile(fpath):
-            ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
-            try:
-                s3_service.upload_file(fpath, f"{s3_images_prefix}/{fname}", content_type=ct, public=True)
-            except Exception as e:
-                logger.error("Failed to background upload %s: %s", fname, e)
-
-
 def _normalize_name(name: str) -> str:
     """Normalize a filename for fuzzy comparison — strip extension, lowercase, remove non-alphanumeric."""
     name = os.path.splitext(name)[0]
@@ -45,36 +34,131 @@ def _normalize_name(name: str) -> str:
     return name
 
 
-def _find_existing_paper(filename: str, threshold: float = 0.8) -> str | None:
-    """Return the ID of an already-processed paper whose filename closely matches filename."""
-    normalized_new = _normalize_name(filename)
-    if not normalized_new:
-        return None
-    try:
-        rows = database.get_all_filenames()
-    except Exception:
-        return None
-    best_ratio = 0.0
-    best_id = None
-    for paper_id, existing_filename in rows:
-        normalized_existing = _normalize_name(existing_filename or "")
-        if not normalized_existing:
-            continue
-        ratio = difflib.SequenceMatcher(None, normalized_new, normalized_existing).ratio()
-        logger.debug("Fuzzy match '%s' vs '%s': ratio=%.4f", normalized_new, normalized_existing, ratio)
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_id = paper_id
-    logger.debug("Best fuzzy match for '%s': ratio=%.2f (id=%s)", filename, best_ratio, best_id)
-    return best_id if best_ratio >= threshold else None
-
-
 def _extract_title(markdown: str) -> str:
     for line in markdown.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
             return re.sub(r"^#+\s*", "", stripped)
     return "Untitled"
+
+
+def _remove_local_paper_artifacts(original_filename: str):
+    """Delete local markdown/html/image artifacts for one paper filename."""
+    base_name = os.path.splitext(os.path.basename(original_filename or ""))[0]
+    if not base_name:
+        return
+
+    md_path = os.path.join(_MD_DIR, f"{base_name}.md")
+    html_path = os.path.join(_PAGES_DIR, f"{base_name}.html")
+    images_dir = os.path.join(_PAGES_DIR, f"{base_name}_images")
+
+    for fpath in (md_path, html_path):
+        if os.path.exists(fpath):
+            try:
+                os.remove(fpath)
+            except Exception as file_err:
+                logger.warning("Failed deleting artifact '%s': %s", fpath, file_err)
+
+    if os.path.isdir(images_dir):
+        try:
+            shutil.rmtree(images_dir, ignore_errors=True)
+        except Exception as dir_err:
+            logger.warning("Failed deleting image directory '%s': %s", images_dir, dir_err)
+
+
+def _paper_public_urls(paper: dict) -> tuple[str, str]:
+    """Build public HTML/markdown URLs for a stored paper row."""
+    orig_filename = paper.get("original_filename") or ""
+    name = os.path.splitext(os.path.basename(orig_filename))[0]
+    if paper.get("s3_html_key"):
+        html_url = s3_service.get_url(paper["s3_html_key"])
+        md_url = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else ""
+    else:
+        encoded_name = quote(name, safe="/-_.")
+        html_url = f"/static/pages/{encoded_name}.html"
+        md_url = ""
+    return html_url, md_url
+
+
+def _dedupe_related_items(items: list[dict], limit: int) -> list[dict]:
+    """Deduplicate related-paper rows by normalized title; keep highest score."""
+    best_by_title: dict[str, dict] = {}
+
+    for item in items:
+        key = _normalize_name(item.get("title") or "") or (item.get("id") or "")
+        if not key:
+            continue
+
+        existing = best_by_title.get(key)
+        current_score = float(item.get("score") or 0)
+        existing_score = float(existing.get("score") or 0) if existing else -1
+
+        if not existing or current_score > existing_score:
+            best_by_title[key] = item
+
+    deduped = list(best_by_title.values())
+    deduped.sort(key=lambda row: float(row.get("score") or 0), reverse=True)
+    return deduped[:limit]
+
+
+def _hydrate_related_papers(paper_id: str, limit: int = 5) -> list[dict]:
+    """Return related papers with URLs for UI/API consumption."""
+    fetch_limit = min(200, max(limit * 5, limit))
+    related = database.get_related_papers(paper_id, limit=fetch_limit)
+    for item in related:
+        html_url, md_url = _paper_public_urls(item)
+        item["html_url"] = html_url
+        item["markdown_url"] = md_url
+    return _dedupe_related_items(related, limit)
+
+
+def _load_cached_markdown_for_paper(paper: dict) -> str:
+    """Load cached summary markdown from S3 via stored key."""
+    s3_md_key = paper.get("s3_markdown_key")
+    if not s3_md_key:
+        return ""
+
+    try:
+        return s3_service.get_text(s3_md_key)
+    except Exception as exc:
+        logger.warning("Failed to read markdown from S3 for id=%s: %s", paper.get("id"), exc)
+        return ""
+
+
+def _compute_and_store_links_for_paper(source_paper: dict, max_results: int = 5) -> list[dict]:
+    """Compute and persist linkage edges for one source paper."""
+    source_id = source_paper["id"]
+    source_title = source_paper.get("title") or "Untitled"
+    source_markdown = _load_cached_markdown_for_paper(source_paper)
+
+    all_papers = database.get_all_papers()
+    candidates = [paper for paper in all_papers if paper.get("id") != source_id]
+    related_papers = paper_linker.find_related_papers(
+        source_title=source_title,
+        source_markdown=source_markdown,
+        candidates=candidates,
+        max_results=max_results,
+        min_score=0.22,
+    )
+
+    database.insert_paper_links(source_id, related_papers)
+    for link in related_papers:
+        database.upsert_paper_link(
+            source_paper_id=link["id"],
+            target_paper_id=source_id,
+            relation_type=link.get("relation_type") or "related_topic",
+            score=float(link.get("score") or 0),
+            evidence=link.get("evidence") or "",
+        )
+
+    for item in related_papers:
+        target_row = next((paper for paper in candidates if paper.get("id") == item["id"]), None)
+        if target_row:
+            html_u, md_u = _paper_public_urls(target_row)
+            item["html_url"] = html_u
+            item["markdown_url"] = md_u
+
+    return related_papers
 
 
 # ── POST /papers/summarize ──────────────────────────────────────────────
@@ -100,49 +184,41 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    # ── Deduplication check ─────────────────────────────────────────────
-    existing_id = _find_existing_paper(file.filename)
-    if existing_id:
-        paper = database.get_paper_by_id(existing_id)
-        # Extra safety: confirm the matched paper's filename is actually close to the upload
-        if paper:
-            stored_name = _normalize_name(paper.get("original_filename") or "")
-            upload_name = _normalize_name(file.filename)
-            match_ratio = difflib.SequenceMatcher(None, upload_name, stored_name).ratio()
-            if match_ratio < 0.8:
-                logger.warning(
-                    "Dedup id=%s matched but ratio=%.2f is too low for '%s' vs '%s' — skipping cache",
-                    existing_id, match_ratio, file.filename, paper.get("original_filename"),
-                )
-                paper = None  # force re-processing
-        if paper:
-            name = os.path.splitext(os.path.basename(paper.get("original_filename", "")))[0]
-            if paper.get("s3_html_key"):
-                html_url = s3_service.get_url(paper["s3_html_key"])
-                md_url = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else ""
-            else:
-                encoded_name = quote(name, safe="/-_.")
-                html_url = f"/static/pages/{encoded_name}.html"
-                md_url = f"/static/markdowns/{encoded_name}.md"
-            md_path = os.path.join(_MD_DIR, f"{name}.md")
-            markdown = ""
-            if os.path.exists(md_path):
-                with open(md_path, "r", encoding="utf-8") as f:
-                    markdown = f.read()
-            logger.info("Paper '%s' already exists (id=%s), returning cached result", file.filename, existing_id)
-            return PipelineResponse(
-                id=paper["id"],
-                title=paper["title"],
-                markdown=markdown,
-                html_url=html_url,
-                markdown_url=md_url,
-                images_used=paper.get("images_used", 0),
-                images_extracted=paper.get("images_extracted", 0),
-                created_at=paper["created_at"],
-            )
-
     try:
         pdf_bytes = await file.read()
+        content_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+        # ── Deduplication check (content hash only) ──
+        existing_id = database.get_paper_id_by_content_hash(content_hash)
+
+        if existing_id:
+            paper = database.get_paper_by_id(existing_id)
+            if paper:
+                html_url, md_url = _paper_public_urls(paper)
+                markdown = _load_cached_markdown_for_paper(paper)
+
+                if not markdown:
+                    logger.info(
+                        "Skipping cache for '%s' because DB markdown is empty",
+                        file.filename,
+                    )
+                    paper = None
+
+            if paper:
+                related_papers = _hydrate_related_papers(paper["id"], limit=5)
+                logger.info("Paper '%s' already exists (id=%s), returning cached result", file.filename, existing_id)
+                return PipelineResponse(
+                    id=paper["id"],
+                    title=paper["title"],
+                    markdown=markdown,
+                    html_url=html_url,
+                    markdown_url=md_url,
+                    images_used=paper.get("images_used", 0),
+                    images_extracted=paper.get("images_extracted", 0),
+                    created_at=paper["created_at"],
+                    related_papers=related_papers,
+                )
+
         # Use only the basename (strip any OS path prefix some browsers may include)
         base_name = os.path.splitext(os.path.basename(file.filename))[0]
 
@@ -153,8 +229,8 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
         with open(tmp_pdf_path, "wb") as tmp_f:
             tmp_f.write(pdf_bytes)
 
-        # 2. Parse PDF → text + images
-        images_dir = os.path.join(_PAGES_DIR, f"{base_name}_images")
+        # 2. Parse PDF → text + images (temporary only)
+        images_dir = os.path.join(tmp_dir, f"{base_name}_images")
         os.makedirs(images_dir, exist_ok=True)
         raw_md = parse_pdf_to_markdown(tmp_pdf_path, images_dir)
 
@@ -175,70 +251,53 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             summary_md,
         )
 
-        # 4. Save markdown locally (use rewritten /static/ paths so frontend can load images)
-        os.makedirs(_MD_DIR, exist_ok=True)
-        md_path = os.path.join(_MD_DIR, f"{base_name}.md")
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(summary_for_html)
-
-        # 6. Generate HTML
-        os.makedirs(_PAGES_DIR, exist_ok=True)
+        # 6. Generate HTML (in-memory)
         html_content = generate_wiki_html(summary_for_html, base_name, _PAGES_DIR)
-        html_path = os.path.join(_PAGES_DIR, f"{base_name}.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
 
-        # 6. Upload to S3 (optional — falls back to local)
+        # 7. Upload to S3 (required)
         s3_pdf_key = ""
         s3_md_key = ""
         s3_html_key = ""
         s3_images_prefix = ""
-        encoded_base = quote(base_name, safe="/-_.")
-        html_url = f"/static/pages/{encoded_base}.html"
-        md_url = f"/static/markdowns/{encoded_base}.md"
+        html_url = ""
+        md_url = ""
         # markdown to return — starts with /static/ paths, upgraded to S3 URLs if available
         final_markdown = summary_for_html
 
         settings = get_settings()
-        if settings.S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID:
-            try:
-                s3_prefix = f"papers/{base_name}"
-                s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf")
-                s3_images_prefix = f"{s3_prefix}/images"
-                
-                # Separate used vs unused images to optimize upload speed
-                used_filenames = [f for f in image_files if f in summary_md]
-                unused_filenames = [f for f in image_files if f not in summary_md]
-                
-                # Upload used images synchronously
-                for fname in used_filenames:
-                    fpath = os.path.join(images_dir, fname)
-                    ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
-                    s3_service.upload_file(fpath, f"{s3_images_prefix}/{fname}", content_type=ct, public=True)
-                
-                # Defer unused images to a background task
-                background_tasks.add_task(_upload_background_images, images_dir, s3_images_prefix, unused_filenames)
+        if not (settings.S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID):
+            raise HTTPException(status_code=503, detail="S3 configuration is required for paper storage.")
 
-                # Rewrite image URLs in markdown to point at S3
-                s3_images_base = s3_service.get_url(s3_images_prefix)
-                images_rel = f"{base_name}_images"
-                final_markdown = re.sub(
-                    r'!\[([^\]]*)\]\(/static/pages/' + re.escape(images_rel) + r'/([^)]+)\)',
-                    rf'![\1]({s3_images_base}/\2)',
-                    summary_for_html,
-                )
+        try:
+            s3_prefix = f"papers/{base_name}"
+            s3_pdf_key = s3_service.upload_bytes(pdf_bytes, f"{s3_prefix}/original.pdf", "application/pdf", public=True)
+            s3_images_prefix = f"{s3_prefix}/images"
 
-                # Save S3-URL version to disk and upload
-                with open(md_path, "w", encoding="utf-8") as f:
-                    f.write(final_markdown)
+            # Upload extracted images from temporary directory
+            for fname in image_files:
+                fpath = os.path.join(images_dir, fname)
+                ct = "image/png" if fname.endswith(".png") else "image/jpeg" if fname.endswith((".jpg", ".jpeg")) else None
+                s3_service.upload_file(fpath, f"{s3_images_prefix}/{fname}", content_type=ct, public=True)
 
-                s3_md_key = s3_service.upload_file(md_path, f"{s3_prefix}/summary.md", "text/markdown")
-                s3_html_key = s3_service.upload_file(html_path, f"{s3_prefix}/wiki.html", "text/html")
-                html_url = s3_service.get_url(s3_html_key)
-                md_url = s3_service.get_url(s3_md_key)
-                logger.info("Uploaded to S3 successfully")
-            except Exception as s3_err:
-                logger.warning("S3 upload failed, using local files: %s", s3_err)
+            # Rewrite image URLs in markdown to point at S3
+            s3_images_base = s3_service.get_url(s3_images_prefix)
+            images_rel = f"{base_name}_images"
+            final_markdown = re.sub(
+                r'!\[([^\]]*)\]\(/static/pages/' + re.escape(images_rel) + r'/([^)]+)\)',
+                rf'![\1]({s3_images_base}/\2)',
+                summary_for_html,
+            )
+
+            s3_md_key = s3_service.upload_bytes(final_markdown.encode("utf-8"), f"{s3_prefix}/summary.md", "text/markdown", public=True)
+            s3_html_key = s3_service.upload_bytes(html_content.encode("utf-8"), f"{s3_prefix}/wiki.html", "text/html", public=True)
+            html_url = s3_service.get_url(s3_html_key)
+            md_url = s3_service.get_url(s3_md_key)
+            logger.info("Uploaded to S3 successfully")
+        except HTTPException:
+            raise
+        except Exception as s3_err:
+            logger.exception("S3 upload failed")
+            raise HTTPException(status_code=503, detail=f"S3 upload failed: {s3_err}")
 
         # Clean up temp
         if os.path.exists(tmp_dir):
@@ -254,7 +313,22 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             s3_images_prefix=s3_images_prefix,
             images_extracted=len(image_files),
             images_used=len(img_refs),
+            content_hash=content_hash,
+            markdown="",
         )
+
+        # 8. Build and persist related-paper links (new -> existing and reverse)
+        related_papers = []
+        try:
+            source_row = {
+                "id": paper_id,
+                "title": title,
+                "original_filename": file.filename,
+            }
+            related_papers = _compute_and_store_links_for_paper(source_row, max_results=5)
+        except Exception as link_err:
+            logger.warning("Related-paper linkage generation failed for %s: %s", paper_id, link_err)
+            related_papers = []
 
         return PipelineResponse(
             id=paper_id,
@@ -265,6 +339,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
             images_used=len(img_refs),
             images_extracted=len(image_files),
             created_at=created_at,
+            related_papers=related_papers,
         )
 
     except ValueError as exc:
@@ -281,18 +356,22 @@ async def list_papers():
     try:
         papers = database.get_all_papers()
         for p in papers:
-            if p.get("s3_html_key"):
-                p["html_url"] = s3_service.get_url(p["s3_html_key"])
-                p["markdown_url"] = s3_service.get_url(p["s3_markdown_key"]) if p.get("s3_markdown_key") else None
-            else:
-                # Fallback to local URLs
-                name = os.path.splitext(os.path.basename(p.get("original_filename", "")))[0]
-                encoded_name = quote(name, safe="/-_.")
-                p["html_url"] = f"/static/pages/{encoded_name}.html"
-                p["markdown_url"] = f"/static/markdowns/{encoded_name}.md"
+            p["html_url"], p["markdown_url"] = _paper_public_urls(p)
         return papers
     except Exception as exc:
         logger.exception("Failed to list papers")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── DELETE /papers ──────────────────────────────────────────────────────
+@router.delete("/")
+async def clean_database():
+    """Clear all papers and links from the database."""
+    try:
+        deleted_count = database.delete_all_papers()
+        return {"deleted": deleted_count, "message": f"Successfully deleted {deleted_count} papers from the database."}
+    except Exception as exc:
+        logger.exception("Failed to clean database")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -305,28 +384,33 @@ async def get_paper(paper_id: str):
         if not paper:
             raise HTTPException(status_code=404, detail="Paper not found")
 
-        name = os.path.splitext(os.path.basename(paper.get("original_filename", "")))[0]
+        paper["html_url"], paper["markdown_url"] = _paper_public_urls(paper)
 
-        if paper.get("s3_html_key"):
-            paper["html_url"] = s3_service.get_url(paper["s3_html_key"])
-            paper["markdown_url"] = s3_service.get_url(paper["s3_markdown_key"]) if paper.get("s3_markdown_key") else None
-        else:
-            encoded_name = quote(name, safe="/-_.")
-            paper["html_url"] = f"/static/pages/{encoded_name}.html"
-            paper["markdown_url"] = f"/static/markdowns/{encoded_name}.md"
+        # Load markdown content from DB
+        paper["markdown"] = _load_cached_markdown_for_paper(paper)
 
-        # Load markdown content from disk so frontend can render preview
-        md_path = os.path.join(_MD_DIR, f"{name}.md")
-        if os.path.exists(md_path):
-            with open(md_path, "r", encoding="utf-8") as f:
-                paper["markdown"] = f.read()
-        else:
-            paper["markdown"] = ""
+        paper["related_papers"] = _hydrate_related_papers(paper_id, limit=5)
 
         return paper
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Failed to get paper")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── GET /papers/{id}/links ─────────────────────────────────────────────
+@router.get("/{paper_id}/links")
+async def get_paper_links(paper_id: str, limit: int = Query(default=20, ge=1, le=100)):
+    """Get related paper links for one paper."""
+    try:
+        paper = database.get_paper_by_id(paper_id)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        return _hydrate_related_papers(paper_id, limit=limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to get paper links")
         raise HTTPException(status_code=500, detail=str(exc))
 
