@@ -1,5 +1,5 @@
 <template>
-  <div class="papers-page">
+  <div class="papers-view">
     <div class="header-row">
       <h1 class="page-title">All Papers</h1>
       <button @click="cleanDb" class="clean-db-btn" :disabled="cleaning">
@@ -60,8 +60,7 @@ export default {
   },
   methods: {
     openPaper(paper) {
-      const url = this.getFullUrl(paper.html_url)
-      window.location.href = url
+      this.$router.push('/result/' + paper.id)
     },
     getFullUrl(url) {
       if (url.startsWith('http')) return url

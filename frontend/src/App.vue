@@ -2,15 +2,19 @@
   <div id="app">
     <header class="wiki-header">
       <router-link to="/" class="header-logo">
-        <span class="header-logo-text">ResearchWiki</span>
+        <img src="https://upload.wikimedia.org/wikipedia/en/thumb/8/80/Wikipedia-logo-v2.svg/103px-Wikipedia-logo-v2.svg.png" alt="Logo" class="logo-image" />
+        <span class="header-logo-text">WikiResearch</span>
       </router-link>
+      <div class="search-container">
+        <input type="text" placeholder="Search WikiResearch" class="search-bar" />
+      </div>
       <nav class="header-nav">
         <router-link to="/" class="header-link">Upload</router-link>
         <router-link to="/papers" class="header-link">Papers</router-link>
       </nav>
     </header>
     <div class="wiki-body">
-      <router-view />
+      <router-view :key="$route.fullPath" />
     </div>
   </div>
 </template>
@@ -64,6 +68,30 @@ body {
   letter-spacing: -0.5px;
 }
 
+.logo-image {
+  height: 35px;
+  margin-right: 8px;
+}
+
+.search-container {
+  margin-left: 2em;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-bar {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid #a2a9b1;
+  border-radius: 20px;
+  font-size: 14px;
+  outline: none;
+}
+
+.search-bar:focus {
+  border-color: #3366cc;
+}
+
 .header-nav {
   display: flex;
   gap: 0;
@@ -94,14 +122,21 @@ body {
 
 .wiki-body {
   flex: 1;
-  max-width: 960px;
+  max-width: 100%;
+  margin: 0;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: #ffffff;
+  min-height: calc(100vh - 50px);
+}
+
+.upload-view, .papers-view {
+  max-width: 1400px;
   margin: 0 auto;
   width: 100%;
   padding: 2em 1.5em;
-  background-color: #ffffff;
-  min-height: calc(100vh - 50px);
-  border-left: 1px solid #eaecf0;
-  border-right: 1px solid #eaecf0;
 }
 
 h1, h2, h3, h4, h5 {

@@ -4,72 +4,61 @@
       <p>Loading paper...</p>
     </div>
 
-    <div v-else-if="paper">
-      <h1 class="page-title">{{ paper.title }}</h1>
+    <div v-else-if="paper" class="paper-content-wrapper">
+      <div class="centered-content">
+        <div class="article-meta">
+          <em>From ResearchWiki — AI-generated summary</em>
+          <span v-if="paper.created_at">
+            · {{ formatDate(paper.created_at) }}</span
+          >
+        </div>
 
-      <div class="article-meta">
-        <em>From ResearchWiki — AI-generated summary</em>
-        <span v-if="paper.created_at">
-          · {{ formatDate(paper.created_at) }}</span
-        >
+        <div class="notice notice-info">
+          <strong>Summary statistics:</strong>
+          {{ paper.images_used }} figure(s) referenced from
+          {{ paper.images_extracted }} extracted.
+          <a v-if="paper.html_url" :href="fullHtmlUrl" target="_blank"
+            >View full wiki page ↗</a
+          >
+        </div>
       </div>
 
-      <div class="notice notice-info">
-        <strong>Summary statistics:</strong>
-        {{ paper.images_used }} figure(s) referenced from
-        {{ paper.images_extracted }} extracted.
-        <a v-if="paper.html_url" :href="fullHtmlUrl" target="_blank"
-          >View full wiki page ↗</a
-        >
-      </div>
-
-      <div class="tab-bar">
-        <span
-          :class="['tab', { active: tab === 'preview' }]"
-          @click="tab = 'preview'"
-          >Article preview</span
-        >
-        <span
-          :class="['tab', { active: tab === 'markdown' }]"
-          @click="tab = 'markdown'"
-          >Markdown source</span
-        >
-      </div>
-
-      <div v-if="tab === 'preview'" class="article-preview-frame">
+      <div class="article-preview-frame">
         <iframe
           v-if="fullHtmlUrl"
           :src="fullHtmlUrl"
           class="wiki-iframe"
+          :style="{ height: iframeHeight }"
           frameborder="0"
+          scrolling="no"
         ></iframe>
         <p v-else class="empty-state">No preview available.</p>
       </div>
 
-      <pre v-else class="source-view">{{ paper.markdown }}</pre>
-
-      <div class="article-footer">
-        <router-link to="/">← Upload another paper</router-link>
-        <span class="sep">|</span>
-        <router-link to="/papers">All papers</router-link>
-      </div>
-
-      <div class="linked-papers">
-        <h3>Linked Papers</h3>
-
-        <div v-if="generatingLinks" class="loading-links">
-          <p>Loading linked papers...</p>
+      <div class="centered-content">
+        <div class="article-footer">
+          <router-link to="/">← Upload another paper</router-link>
+          <span class="sep">|</span>
+          <router-link to="/papers">All papers</router-link>
         </div>
-        <div v-else-if="paper.related_papers && paper.related_papers.length > 0">
-          <ul>
-            <li v-for="rp in paper.related_papers" :key="rp.id">
-              <router-link :to="'/result/' + rp.id">{{ rp.title }}</router-link>
-              <div class="evidence">Confidence: {{ rp.score }} — {{ rp.evidence }}</div>
-            </li>
-          </ul>
-        </div>
-        <div v-else>
-          <p class="empty-links">No linked papers found.</p>
+
+        <div class="linked-papers">
+          <h3>Linked Papers</h3>
+
+          <div v-if="generatingLinks" class="loading-links">
+            <p>Loading linked papers...</p>
+          </div>
+          <div v-else-if="paper.related_papers && paper.related_papers.length > 0">
+            <ul>
+              <li v-for="rp in paper.related_papers" :key="rp.id">
+                <router-link :to="'/result/' + rp.id">{{ rp.title }}</router-link>
+                <div class="evidence">Confidence: {{ rp.score }} — {{ rp.evidence }}</div>
+              </li>
+            </ul>
+          </div>
+          <div v-else>
+            <p class="empty-links">No linked papers found.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -86,8 +75,8 @@ export default {
     return {
       paper: null,
       loading: true,
-      tab: "preview",
       generatingLinks: false,
+      iframeHeight: 'calc(100vh - 120px)',
     };
   },
   computed: {
@@ -141,7 +130,18 @@ export default {
     }
     this.loading = false;
   },
+  mounted() {
+    window.addEventListener("message", this.handleMessage);
+  },
+  beforeUnmount() {
+    window.removeEventListener("message", this.handleMessage);
+  },
   methods: {
+    handleMessage(event) {
+      if (event.data && event.data.type === "resize" && event.data.height) {
+        this.iframeHeight = event.data.height + 20 + "px"; // add a small buffer
+      }
+    },
     formatDate(iso) {
       return new Date(iso).toLocaleDateString("en-US", {
         month: "long",
@@ -179,23 +179,38 @@ export default {
 </script>
 
 <style scoped>
-.page-title {
-  font-size: 2.2em;
-  margin-bottom: 0.15em;
+.result-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.paper-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.centered-content {
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 1.5em;
 }
 
 .article-meta {
   color: #54595d;
   font-size: 0.85em;
-  margin-bottom: 1.25em;
+  margin-bottom: 0;
   padding-bottom: 0.75em;
+  padding-top: 2em;
   border-bottom: 1px solid #eaecf0;
 }
 
 .notice {
+  margin: 1.5em 1.5em;
   padding: 0.75em 1em;
   border-left: 4px solid;
-  margin-bottom: 1.5em;
   font-size: 0.9em;
 }
 
@@ -204,42 +219,21 @@ export default {
   background-color: #eaf3ff;
 }
 
-.tab-bar {
-  display: flex;
-  border-bottom: 1px solid #a2a9b1;
-  margin-bottom: 1.25em;
-}
-
-.tab {
-  padding: 0.5em 1.25em;
-  cursor: pointer;
-  font-size: 0.9em;
-  color: #3366cc;
-  border-bottom: 3px solid transparent;
-  margin-bottom: -1px;
-}
-
-.tab:hover {
-  background-color: #eaecf0;
-}
-
-.tab.active {
-  color: #202122;
-  border-bottom-color: #3366cc;
-  background-color: #fff;
-  font-weight: 500;
-}
 
 .article-preview-frame {
   width: 100%;
-  margin-top: 1em;
+  flex: 1;
+  display: flex;
+  margin-top: 0;
 }
 
 .wiki-iframe {
   width: 100%;
-  height: 80vh;
-  border: 1px solid #eaecf0;
-  border-radius: 2px;
+  min-height: calc(100vh - 120px);
+  border: none;
+  border-top: 1px solid #eaecf0;
+  border-bottom: 1px solid #eaecf0;
+  overflow: hidden;
 }
 
 .article-body {
@@ -305,17 +299,6 @@ export default {
   padding-top: 0.25em;
 }
 
-.source-view {
-  background-color: #f8f9fa;
-  border: 1px solid #eaecf0;
-  padding: 1em;
-  font-family: monospace;
-  font-size: 0.85em;
-  line-height: 1.6;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  color: #202122;
-}
 
 .article-footer {
   margin-top: 2em;

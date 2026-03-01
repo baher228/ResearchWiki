@@ -73,29 +73,31 @@ body {
 
 .wiki-container {
     display: flex;
-    margin: 50px auto 0 auto;
     max-width: 1400px;
-    column-gap: 2em;
+    margin: 0 auto;
+    padding: 2em;
+    column-gap: 3em;
 }
 
 .wiki-sidebar {
-    width: 14em;
+    width: 250px;
     flex-shrink: 0;
-    padding: 1.25em 0 1.25em 0;
+    padding: 0;
     background-color: transparent;
-    height: calc(100vh - 50px);
+    height: auto;
+    max-height: 100vh;
     position: sticky;
-    top: 50px;
+    top: 0;
     overflow-y: auto;
 }
 
 .wiki-content {
     flex-grow: 1;
-    padding: 2.5em 3em;
+    padding: 0;
     background-color: transparent;
     max-width: 900px;
     border: none;
-    min-height: calc(100vh - 50px);
+    min-height: 100%;
 }
 
 .sidebar-header {
@@ -127,7 +129,8 @@ h2 {
 
 h1 {
     font-size: 2.2em;
-    text-align: center;
+    text-align: left;
+    margin-top: 0;
 }
 
 h2 {
@@ -158,27 +161,56 @@ a:hover {
     margin-bottom: 2em;
     display: block;
     font-size: 0.9em;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Lato, Helvetica, Arial, sans-serif;
     color: #202122;
 }
 
 .toc ul {
     list-style-type: none;
-    padding-left: 1.5em;
+    padding-left: 0;
     margin: 0;
 }
 
-.toc>ul {
+.toc > ul {
     padding-left: 0;
 }
 
+.toc > ul > li {
+    font-weight: bold;
+    margin-top: 0.75em;
+    margin-bottom: 0.25em;
+}
+
+.toc ul ul {
+    padding-left: 1.2em;
+    border-left: 1px solid #eaecf0;
+    margin-left: 0.6em;
+    margin-top: 0.25em;
+    margin-bottom: 0.25em;
+}
+
 .toc li {
-    margin-bottom: 0.5em;
+    margin-bottom: 0.4em;
+    line-height: 1.3;
+}
+
+.toc li > a {
+    color: #0645ad;
+    text-decoration: none;
+    font-weight: normal;
+}
+
+.toc > ul > li > a {
+    color: #202122;
+    font-weight: bold;
+}
+
+.toc li > a:hover {
+    text-decoration: underline;
 }
 
 .toc .toctitle {
-    font-weight: bold;
-    text-align: center;
-    margin-bottom: 0.5em;
+    display: none;
 }
 
 .wiki-figure.right {
