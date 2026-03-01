@@ -155,7 +155,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
             color: #202122;
             padding: 12px;
             border: 1px solid #a2a9b1;
-            border-radius: 4px;
+            border-radius: 28px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             max-width: 350px;
             z-index: 1000;
@@ -168,22 +168,10 @@ def generate_wiki_html(md_text, base_name, output_dir):
             color: #54595d;
             font-style: italic;
         }}
-        .highlight-popup-close {{
-            position: absolute;
-            top: 4px;
-            right: 8px;
-            cursor: pointer;
-            color: #a2a9b1;
-            font-size: 1.2em;
-            line-height: 1;
-            font-weight: bold;
-        }}
-        .highlight-popup-close:hover {{ color: #202122; }}
     </style>
 </head>
 <body>
     <div id="highlight-popup" class="highlight-popup">
-        <span class="highlight-popup-close" onclick="document.getElementById('highlight-popup').style.display='none'">&times;</span>
         <div id="highlight-popup-content"></div>
     </div>
 
@@ -228,6 +216,8 @@ def generate_wiki_html(md_text, base_name, output_dir):
             }});
 
             // Text Highlight Popup Logic
+            let descCache = {{ text: null, error: null }};
+
             document.addEventListener('mouseup', function(e) {{
                 const popup = document.getElementById('highlight-popup');
                 if (popup.contains(e.target)) return;
@@ -240,15 +230,43 @@ def generate_wiki_html(md_text, base_name, output_dir):
                     const rect = range.getBoundingClientRect();
                     
                     popup.style.display = 'block';
-                    document.getElementById('highlight-popup-content').innerHTML = '<span class="loading">Generating description...</span>';
+                    descCache = {{ text: null, error: null }};
+                    
+                    const contentDiv = document.getElementById('highlight-popup-content');
+                    contentDiv.innerText = 'Explain';
+                    
+                    // Style the popup to look like a button
+                    popup.style.cursor = 'pointer';
+                    popup.style.background = '#ffffff';
+                    popup.style.border = '1px solid #a2a9b1';
+                    popup.style.padding = '8px 16px';
+                    popup.style.fontWeight = 'bold';
+                    popup.style.textAlign = 'center';
+                    
+                    popup.onclick = function() {{
+                        popup.onclick = null; // Remove listener
+                        popup.style.cursor = 'auto';
+                        popup.style.background = '#fff';
+                        popup.style.padding = '12px';
+                        popup.style.fontWeight = 'normal';
+                        popup.style.textAlign = 'left';
+                        
+                        if (descCache.text) {{
+                            contentDiv.innerText = descCache.text;
+                        }} else if (descCache.error) {{
+                            contentDiv.innerHTML = '<span style="color:red">Failed to generate description.</span>';
+                        }} else {{
+                            contentDiv.innerHTML = '<span class="loading">Generating description...</span>';
+                        }}
+                    }};
                     
                     const topPos = rect.top + window.scrollY - popup.offsetHeight - 10;
                     popup.style.left = Math.max(10, rect.left + window.scrollX) + 'px';
                     popup.style.top = Math.max(10, topPos) + 'px';
                     
-                    const apiUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
-                        ? "http://localhost:8000/papers/description" 
-                        : "/papers/description";
+                    // Since the HTML is hosted on S3 and rendered in an iframe, we need to explicitly call the local backend
+                    // You might need a more robust way to inject the backend URL in production.
+                    const apiUrl = "http://localhost:8000/papers/description";
 
                     fetch(apiUrl, {{
                         method: 'POST',
@@ -260,15 +278,22 @@ def generate_wiki_html(md_text, base_name, output_dir):
                         return res.json();
                     }})
                     .then(data => {{
-                        const contentDiv = document.getElementById('highlight-popup-content');
-                        contentDiv.innerText = data.markdown || "No description generated.";
-                        
-                        const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
-                        popup.style.top = Math.max(10, newTop) + 'px';
+                        descCache.text = data.markdown || "No description generated.";
+                        if (contentDiv.querySelector('.loading')) {{
+                            contentDiv.innerText = descCache.text;
+                            
+                            setTimeout(() => {{
+                                const newTop = rect.top + window.scrollY - popup.offsetHeight - 10;
+                                popup.style.top = Math.max(10, newTop) + 'px';
+                            }}, 0);
+                        }}
                     }})
                     .catch(err => {{
                         console.error("Popup Error:", err);
-                        document.getElementById('highlight-popup-content').innerHTML = '<span style="color:red">Failed to generate description.</span>';
+                        descCache.error = true;
+                        if (contentDiv.querySelector('.loading')) {{
+                            contentDiv.innerHTML = '<span style="color:red">Failed to generate description.</span>';
+                        }}
                     }});
                 }} else {{
                     popup.style.display = 'none';
@@ -279,6 +304,7 @@ def generate_wiki_html(md_text, base_name, output_dir):
                 const popup = document.getElementById('highlight-popup');
                 if (popup.style.display === 'block' && !popup.contains(e.target)) {{
                     popup.style.display = 'none';
+                    popup.onclick = null;
                 }}
             }});
         }});

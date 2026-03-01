@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
-from app.services import mistral_service, s3_service, paper_linker
+from app.services import mistral_service, s3_service, paper_linker, description_service
 from app.services.wiki_parser import parse_pdf_to_markdown
 from app.services.wiki_generator import generate_wiki_html
 from app.config import get_settings

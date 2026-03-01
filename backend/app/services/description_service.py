@@ -34,7 +34,7 @@ async def get_description(text: str) -> str:
 
     user_message = f"Summarize the following text into a description:\n\n{text}"
 
-    model_id = settings.MISTRAL_MODEL_FAST
+    model_id = settings.MISTRAL_FAST_MODEL
     logger.info("Sending text (%d chars) to Bedrock model %s", len(user_message), model_id)
 
     client = _get_bedrock_client()

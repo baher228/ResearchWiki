@@ -31,13 +31,13 @@ Output format (plain markdown headings):
 4) Simple example to illustrate it
 5) What this research could be used for
 6) One important limitation or caveat
-7) Reference (list the paper, no extra citations)
+7) References
 
 Writing style:
 - Very simple sentences, minimal jargon.
 - Prefer analogies and concrete examples over any detail of the algorithm.
 - Assume the reader will only spend 1-2 minutes reading this.
-- Do NOT include figures or image placeholders at this level.
+- Do include figures or image placeholders at this level.
 ```
 
 ***

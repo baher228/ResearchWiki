@@ -3,7 +3,7 @@ from typing import Optional
 
 
 class SummarizeRequest(BaseModel):
-    text: str = Field(..., min_length=50)
+    text: str = Field(...)
 
 
 class SummarizeResponse(BaseModel):
