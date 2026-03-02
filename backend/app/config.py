@@ -6,9 +6,9 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")  # kept for reference
-    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral.mistral-large-2407-v1:0")
-    MISTRAL_FAST_MODEL: str = os.getenv("MISTRAL_FAST_MODEL", "mistral.ministral-3-8b-instruct")
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
+    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
+    MISTRAL_FAST_MODEL: str = os.getenv("MISTRAL_FAST_MODEL", "ministral-3b-latest")
 
     # PostgreSQL (RDS)
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")

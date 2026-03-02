@@ -2,29 +2,74 @@ import json
 import logging
 import re
 import asyncio
-
-import boto3
-from botocore.config import Config as BotoConfig
+from urllib import request, error
 
 from app.config import get_settings
 from app.prompt import PROMPT_1, PROMPT_2, PROMPT_3, PROMPT_4, PROMPT_5
 
 logger = logging.getLogger(__name__)
 
-_BEDROCK_CONFIG = BotoConfig(read_timeout=600, connect_timeout=10)
+
+def _extract_text_content(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts).strip()
+    return ""
 
 
-def _get_bedrock_client():
+def _mistral_chat_completion(*, model: str, system_prompt: str | None, user_message: str, temperature: float, max_tokens: int) -> str:
     settings = get_settings()
-    kwargs = {
-        "region_name": settings.AWS_REGION,
-        "aws_access_key_id": settings.AWS_ACCESS_KEY_ID,
-        "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY,
-        "config": _BEDROCK_CONFIG,
+    if not settings.MISTRAL_API_KEY:
+        raise RuntimeError("MISTRAL_API_KEY is not set")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_message})
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
-    if settings.AWS_SESSION_TOKEN:
-        kwargs["aws_session_token"] = settings.AWS_SESSION_TOKEN
-    return boto3.client("bedrock-runtime", **kwargs)
+    body = json.dumps(payload).encode("utf-8")
+
+    req = request.Request(
+        "https://api.mistral.ai/v1/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.MISTRAL_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=120) as resp:
+            response_data = json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Mistral API HTTP {e.code}: {detail}") from e
+    except error.URLError as e:
+        raise RuntimeError(f"Mistral API network error: {e}") from e
+
+    choices = response_data.get("choices") or []
+    if not choices:
+        raise RuntimeError("Mistral API returned no choices")
+
+    message = choices[0].get("message") or {}
+    content = _extract_text_content(message.get("content"))
+    if not content:
+        raise RuntimeError("Mistral API returned empty message content")
+    return content
 
 
 def _extract_image_info(paper_text: str) -> list[dict]:
@@ -99,7 +144,7 @@ def _strip_markdown_fences(text: str) -> str:
 
 
 async def summarize_paper(text: str, system_prompt: str = PROMPT_1) -> str:
-    """Send paper text to Bedrock Mistral and return a wiki-style markdown summary."""
+    """Send paper text to Mistral API and return a wiki-style markdown summary."""
 
     settings = get_settings()
 
@@ -113,31 +158,16 @@ async def summarize_paper(text: str, system_prompt: str = PROMPT_1) -> str:
         user_message += image_list_text
 
     model_id = settings.MISTRAL_MODEL
-    logger.info("Sending paper (%d chars) to Bedrock model %s", len(user_message), model_id)
+    logger.info("Sending paper (%d chars) to Mistral model %s", len(user_message), model_id)
 
-    client = _get_bedrock_client()
-
-    # Bedrock Mistral uses the Converse API
-    response = client.converse(
-        modelId=model_id,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"text": user_message}
-                ],
-            },
-        ],
-        system=[
-            {"text": system_prompt}
-        ],
-        inferenceConfig={
-            "temperature": 0.3,
-            "maxTokens": 8192,
-        },
+    markdown_content = await asyncio.to_thread(
+        _mistral_chat_completion,
+        model=model_id,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        temperature=0.3,
+        max_tokens=8192,
     )
-
-    markdown_content = response["output"]["message"]["content"][0]["text"]
     markdown_content = _strip_markdown_fences(markdown_content)
 
     logger.info("Received markdown response (%d chars)", len(markdown_content))
@@ -207,28 +237,14 @@ Return ONLY a JSON array of objects, where each object has:
 Ensure the output is valid JSON."""
 
     model_id = settings.MISTRAL_MODEL
-    client = _get_bedrock_client()
-
-    response = client.converse(
-        modelId=model_id,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"text": user_prompt}
-                ],
-            },
-        ],
-        system=[
-            {"text": system_prompt}
-        ],
-        inferenceConfig={
-            "temperature": 0.1,
-            "maxTokens": 2048,
-        },
+    output_text = await asyncio.to_thread(
+        _mistral_chat_completion,
+        model=model_id,
+        system_prompt=system_prompt,
+        user_message=user_prompt,
+        temperature=0.1,
+        max_tokens=2048,
     )
-
-    output_text = response["output"]["message"]["content"][0]["text"]
     try:
         if "```json" in output_text:
             output_text = output_text.split("```json")[1].split("```")[0].strip()
