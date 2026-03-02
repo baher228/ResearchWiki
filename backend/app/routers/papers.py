@@ -6,11 +6,12 @@ import re
 import shutil
 import tempfile
 import json
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query, Form, Request
+from fastapi.responses import HTMLResponse, Response
+from bs4 import BeautifulSoup
 
 from app.schemas.paper import SummarizeRequest, SummarizeResponse, PipelineResponse
 from app.services import mistral_service, s3_service, description_service
@@ -43,6 +44,78 @@ def _extract_title(markdown: str) -> str:
         if stripped.startswith("#"):
             return re.sub(r"^#+\s*", "", stripped)
     return "Untitled"
+
+
+_GENERIC_TITLES = {
+    "summary",
+    "paper summary",
+    "research paper summary",
+    "overview",
+    "introduction",
+    "abstract",
+    "untitled",
+}
+
+
+def _clean_title_candidate(text: str) -> str:
+    text = re.sub(r"^#+\s*", "", text or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip("-:| ")
+
+
+def _is_generic_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    if not t:
+        return True
+    if t in _GENERIC_TITLES:
+        return True
+    if re.fullmatch(r"(section|part)\s+\d+", t):
+        return True
+    return False
+
+
+def _title_from_filename(raw_name: str) -> str:
+    candidate = re.sub(r"[_\-]+", " ", raw_name or "").strip()
+    candidate = re.sub(r"\s+", " ", candidate)
+    return candidate or "Untitled"
+
+
+def _extract_title_from_raw_markdown(raw_md: str) -> str:
+    """Best-effort title detection from parser output (before LLM rewriting)."""
+    lines = raw_md.splitlines()
+    for line in lines[:40]:
+        s = _clean_title_candidate(line)
+        if not s:
+            continue
+        if s.startswith("!") or s.startswith("["):
+            continue
+        if len(s) < 8 or len(s) > 220:
+            continue
+        lowered = s.lower()
+        if lowered in {
+            "abstract",
+            "introduction",
+            "references",
+            "acknowledgments",
+            "conclusion",
+        }:
+            continue
+        if re.match(r"^\d+(\.\d+)*\s+", s):
+            continue
+        return s
+    return ""
+
+
+def _select_paper_title(summary_md: str, raw_md: str, raw_name: str) -> str:
+    summary_title = _clean_title_candidate(_extract_title(summary_md or ""))
+    if summary_title and not _is_generic_title(summary_title):
+        return summary_title
+
+    raw_title = _clean_title_candidate(_extract_title_from_raw_markdown(raw_md or ""))
+    if raw_title and not _is_generic_title(raw_title):
+        return raw_title
+
+    return _title_from_filename(raw_name)
 
 
 def _remove_local_paper_artifacts(original_filename: str):
@@ -149,6 +222,75 @@ def _load_cached_markdown_for_paper(paper: dict) -> str:
         return ""
 
 
+def _extract_summary_markdown_text(stored_markdown_blob: str) -> str:
+    """Extract one markdown summary text from stored JSON/text payload."""
+    text = (stored_markdown_blob or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list) and parsed:
+            first = parsed[0]
+            return first if isinstance(first, str) else ""
+        if isinstance(parsed, str):
+            return parsed
+    except Exception:
+        pass
+    return text
+
+
+def _extract_summary_markdown_levels(stored_markdown_blob: str) -> list[str]:
+    """Extract all markdown summary levels from stored JSON/text payload."""
+    text = (stored_markdown_blob or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, str) and item.strip()]
+        if isinstance(parsed, str) and parsed.strip():
+            return [parsed]
+    except Exception:
+        pass
+    return [text]
+
+
+def _rewrite_image_sources_for_backend(html_content: str, paper_id: str, paper: dict, base_url: str) -> str:
+    """Rewrite image URLs in stored HTML so they are served via backend authenticated endpoint."""
+    s3_images_prefix = str(paper.get("s3_images_prefix") or "")
+    if not s3_images_prefix:
+        return html_content
+
+    prefix_token = f"/{s3_images_prefix}/"
+    s3_prefix_token = f"{s3_images_prefix}/"
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    changed = False
+
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if not src:
+            continue
+
+        image_name = ""
+        if prefix_token in src:
+            image_name = src.split(prefix_token, 1)[1]
+        elif s3_prefix_token in src:
+            image_name = src.split(s3_prefix_token, 1)[1]
+
+        if not image_name:
+            continue
+
+        image_name = unquote(image_name).split("?", 1)[0].split("#", 1)[0].lstrip("/")
+        if not image_name:
+            continue
+
+        img["src"] = f"{base_url}/papers/{paper_id}/image/{quote(image_name, safe='/')}"
+        changed = True
+
+    return str(soup) if changed else html_content
+
+
 
 
 # ── POST /papers/summarize ──────────────────────────────────────────────
@@ -247,7 +389,7 @@ async def upload_paper(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
         # 3. Mistral summarization (concurrent mapping)
         summaries = await mistral_service.generate_all_summaries(raw_md)
-        title = _extract_title(summaries[0])
+        title = _select_paper_title(summaries[0], raw_md, raw_name)
         
         combined_md = "\n".join(summaries)
         img_refs = re.findall(r'!\[[^\]]*\]\([^)]+\)', combined_md)
@@ -413,6 +555,106 @@ async def clean_database():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── POST /papers/repair-titles ─────────────────────────────────────────
+@router.post("/repair-titles")
+async def repair_titles(limit: int = Query(default=5000, ge=1, le=20000)):
+    """One-time maintenance endpoint: repair generic paper titles in DB."""
+    try:
+        papers = database.get_all_papers()
+        scanned = 0
+        updated = 0
+        skipped = 0
+
+        for paper in papers[:limit]:
+            scanned += 1
+            current_title = _clean_title_candidate(str(paper.get("title") or ""))
+
+            if current_title and not _is_generic_title(current_title):
+                skipped += 1
+                continue
+
+            original_filename = str(paper.get("original_filename") or "")
+            raw_name = os.path.splitext(os.path.basename(original_filename))[0]
+
+            summary_blob = _load_cached_markdown_for_paper(paper)
+            summary_md = _extract_summary_markdown_text(summary_blob)
+            new_title = _select_paper_title(summary_md, "", raw_name)
+
+            if not new_title or _is_generic_title(new_title):
+                skipped += 1
+                continue
+
+            if database.update_paper_title(str(paper["id"]), new_title):
+                updated += 1
+            else:
+                skipped += 1
+
+        return {
+            "ok": True,
+            "scanned": scanned,
+            "updated": updated,
+            "skipped": skipped,
+            "total_in_db": len(papers),
+        }
+    except Exception as exc:
+        logger.exception("Failed to repair titles")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── POST /papers/rerender-html ─────────────────────────────────────────
+@router.post("/rerender-html")
+async def rerender_html(limit: int = Query(default=5000, ge=1, le=20000), paper_id: Optional[str] = None):
+    """One-time maintenance endpoint: re-render wiki HTML from stored markdown summaries."""
+    try:
+        papers = [database.get_paper_by_id(paper_id)] if paper_id else database.get_all_papers()
+        papers = [p for p in papers if p]
+
+        scanned = 0
+        updated = 0
+        skipped = 0
+
+        for paper in papers[:limit]:
+            scanned += 1
+
+            s3_md_key = paper.get("s3_markdown_key")
+            s3_html_key = paper.get("s3_html_key")
+            if not s3_md_key or not s3_html_key:
+                skipped += 1
+                continue
+
+            try:
+                markdown_blob = s3_service.get_text(s3_md_key)
+                levels = _extract_summary_markdown_levels(markdown_blob)
+                if not levels:
+                    skipped += 1
+                    continue
+
+                original_filename = str(paper.get("original_filename") or "")
+                raw_name = os.path.splitext(os.path.basename(original_filename))[0]
+                base_name = re.sub(r'[\s]+', '_', raw_name)
+                base_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '', base_name)
+                if not base_name:
+                    base_name = "paper"
+
+                html_content = generate_wiki_html(levels, base_name, _PAGES_DIR)
+                s3_service.upload_bytes(html_content.encode("utf-8"), s3_html_key, "text/html", public=True)
+                updated += 1
+            except Exception as one_err:
+                logger.warning("Failed rerender for paper id=%s: %s", paper.get("id"), one_err)
+                skipped += 1
+
+        return {
+            "ok": True,
+            "scanned": scanned,
+            "updated": updated,
+            "skipped": skipped,
+            "total_in_db": len(papers),
+        }
+    except Exception as exc:
+        logger.exception("Failed to rerender HTML")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── GET /papers/{id} ────────────────────────────────────────────────────
 @router.get("/{paper_id}")
 async def get_paper(paper_id: str):
@@ -439,7 +681,7 @@ async def get_paper(paper_id: str):
 
 # ── GET /papers/{id}/html ───────────────────────────────────────────────
 @router.get("/{paper_id}/html")
-async def get_paper_html(paper_id: str):
+async def get_paper_html(paper_id: str, request: Request):
     """Get the raw HTML content for a paper's wiki page."""
     try:
         paper = database.get_paper_by_id(paper_id)
@@ -449,6 +691,8 @@ async def get_paper_html(paper_id: str):
         s3_html_key = paper.get("s3_html_key")
         if s3_html_key:
             html_content = s3_service.get_text(s3_html_key)
+            base_url = str(request.base_url).rstrip("/")
+            html_content = _rewrite_image_sources_for_backend(html_content, paper_id, paper, base_url)
             return HTMLResponse(content=html_content)
         
         # Fallback to local file if no S3 key is present
@@ -465,13 +709,42 @@ async def get_paper_html(paper_id: str):
             local_path = os.path.join(_PAGES_DIR, f"{candidate}.html")
             if os.path.exists(local_path):
                 with open(local_path, "r", encoding="utf-8") as f:
-                    return HTMLResponse(content=f.read())
+                    html_content = f.read()
+                    base_url = str(request.base_url).rstrip("/")
+                    html_content = _rewrite_image_sources_for_backend(html_content, paper_id, paper, base_url)
+                    return HTMLResponse(content=html_content)
         
         raise HTTPException(status_code=404, detail="HTML content not found")
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Failed to get paper HTML")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/{paper_id}/image/{image_name:path}")
+async def get_paper_image(paper_id: str, image_name: str):
+    """Serve paper images through backend using configured S3 credentials."""
+    try:
+        paper = database.get_paper_by_id(paper_id)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        s3_images_prefix = paper.get("s3_images_prefix")
+        if not s3_images_prefix:
+            raise HTTPException(status_code=404, detail="Paper has no image storage")
+
+        normalized_name = unquote(image_name).lstrip("/")
+        if not normalized_name:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        s3_key = f"{s3_images_prefix}/{normalized_name}"
+        data, content_type = s3_service.get_object_bytes(s3_key)
+        return Response(content=data, media_type=content_type or "application/octet-stream")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load paper image")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

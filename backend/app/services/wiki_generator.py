@@ -3,6 +3,43 @@ import re
 import markdown
 from bs4 import BeautifulSoup
 
+
+def _normalize_math_markdown(md_text: str) -> str:
+    """Normalize common math formats so MathJax can render them reliably."""
+    if not md_text:
+        return md_text
+
+    # Convert explicit LaTeX display delimiters to $$...$$ for markdown friendliness
+    md_text = re.sub(r"\\\[(.+?)\\\]", lambda m: f"$$\n{m.group(1).strip()}\n$$", md_text, flags=re.DOTALL)
+
+    # Some model outputs lose backslashes and become plain [ ... ] around equations.
+    # Promote likely equation-only lines to display math.
+    normalized_lines = []
+    in_code_fence = False
+    for line in md_text.splitlines():
+        if line.strip().startswith("```"):
+            in_code_fence = not in_code_fence
+            normalized_lines.append(line)
+            continue
+
+        if in_code_fence:
+            normalized_lines.append(line)
+            continue
+
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            inner = stripped[1:-1].strip()
+            if inner and ("\\" in inner or "_" in inner or "^" in inner):
+                normalized_lines.append(f"$$\n{inner}\n$$")
+                continue
+
+        # Normalize inline delimiters \(...\) -> $...$
+        line = re.sub(r"\\\((.+?)\\\)", lambda m: f"${m.group(1).strip()}$", line)
+
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines)
+
 def generate_wiki_html(md_texts, base_name, output_dir):
     """
     Converts a list of Markdown texts to a styled Wikipedia-like HTML page.
@@ -15,6 +52,8 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     all_contents = []
     
     for idx, md_text in enumerate(md_texts):
+        md_text = _normalize_math_markdown(md_text)
+
         # Add a main title for the document if not present
         if not md_text.lstrip().startswith("# "):
             title_text = base_name.replace('_', ' ')
@@ -141,6 +180,19 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{base_name}</title>
+    <script>
+        window.MathJax = {{
+            tex: {{
+                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+                processEscapes: true
+            }},
+            options: {{
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            }}
+        }};
+    </script>
+    <script async id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         body {{ margin: 0; padding: 0; overflow: hidden; }}
         {css_content}
@@ -230,6 +282,14 @@ def generate_wiki_html(md_texts, base_name, output_dir):
     </div>
     <script>
         document.addEventListener("DOMContentLoaded", function() {{
+            function typesetMath() {{
+                if (window.MathJax && window.MathJax.typesetPromise) {{
+                    window.MathJax.typesetPromise().catch(function(err) {{
+                        console.error('MathJax typeset error:', err);
+                    }});
+                }}
+            }}
+
             // Slider Logic
             const slider = document.getElementById('level-slider');
             const levelDisplay = document.getElementById('level-display');
@@ -247,7 +307,11 @@ def generate_wiki_html(md_texts, base_name, output_dir):
                 const activeContent = document.getElementById('content-' + level);
                 if (activeToc) activeToc.style.display = 'block';
                 if (activeContent) activeContent.style.display = 'block';
+                typesetMath();
             }});
+
+            // Initial math render
+            typesetMath();
 
             const headings = document.querySelectorAll('.wiki-content h1, .wiki-content h2, .wiki-content h3, .wiki-content h4, .wiki-content h5, .wiki-content h6');
             headings.forEach(heading => {{

@@ -65,6 +65,16 @@ def get_text(s3_key: str) -> str:
     return response["Body"].read().decode("utf-8")
 
 
+def get_object_bytes(s3_key: str) -> tuple[bytes, str | None]:
+    """Get raw bytes + content type of an S3 object."""
+    settings = get_settings()
+    client = _get_client()
+    response = client.get_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
+    data = response["Body"].read()
+    content_type = response.get("ContentType")
+    return data, content_type
+
+
 def upload_directory(local_dir: str, s3_prefix: str, public: bool = False) -> int:
     """Upload all files in a directory to S3 under a prefix. Returns count."""
     count = 0
